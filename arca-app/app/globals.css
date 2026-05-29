@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* Inter loaded via <link> in layout.tsx */
+
+/* ── Reset & transparency ─────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #__next, #root {
+  background:       transparent !important;
+  background-color: transparent !important;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: -apple-system, 'Inter', BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Next.js App Router mounts into body > div — force transparent */
+body > div:first-of-type {
+  background:       transparent !important;
+  background-color: transparent !important;
+}
+
+/* Allow text selection inside interactive content */
+input, textarea, p, span, li, [contenteditable] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ── Invisible scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar           { width: 0; height: 0; }
+::-webkit-scrollbar-track     { background: transparent; }
+::-webkit-scrollbar-thumb     { background: transparent; }
+
+/* ── Selection colour ────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(83, 74, 183, 0.45);
+  color: #fff;
+}
+
+/* ── Remove mobile tap flash ─────────────────────────────────────────────── */
+* {
+  -webkit-tap-highlight-color: transparent;
+}

@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=480, initial-scale=1.0">
+  <title>ARCA — Bienvenido</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 480px;
+      height: 600px;
+      overflow: hidden;
+      background: #0f0f14;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: #fff;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    ::-webkit-scrollbar { display: none; }
+
+    input, textarea {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    /* ─── App shell ─── */
+    #app {
+      width: 480px;
+      height: 600px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #app::before {
+      content: '';
+      position: absolute;
+      top: -80px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 340px;
+      height: 340px;
+      background: radial-gradient(circle, rgba(83,74,183,0.18) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─── Steps wrapper ─── */
+    .steps-wrapper {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* ─── Individual step ─── */
+    .step {
+      position: absolute;
+      inset: 0;
+      padding: 32px 36px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      opacity: 0;
+      transform: translateX(40px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .step.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    .step.exit-left  { opacity: 0; transform: translateX(-40px); }
+    .step.exit-right { opacity: 0; transform: translateX(40px);  }
+    .step.enter-right { transform: translateX(40px);  opacity: 0; }
+    .step.enter-left  { transform: translateX(-40px); opacity: 0; }
+
+    /* ─── Progress dots ─── */
+    #progress-dots {
+      height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 2;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      transition: background 0.25s ease, transform 0.25s ease;
+    }
+
+    /* ─── Back button ─── */
+    .btn-back {
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+      padding: 0;
+      width: fit-content;
+      align-self: flex-start;
+      transition: color 0.15s ease, transform 0.15s ease;
+    }
+
+    .btn-back:hover {
+      color: rgba(255,255,255,0.7);
+      transform: translateX(-2px);
+    }
+
+    .btn-back:hover svg {
+      transform: rotate(-5deg);
+    }
+
+    .btn-back svg {
+      transition: transform 0.15s ease;
+    }
+
+    /* ─── Cards ─── */
+    .card {
+      flex: 1;
+      border-radius: 14px;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      cursor: pointer;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card-purple {
+      background: rgba(83,74,183,0.14);
+      border: 1px solid rgba(120,100,240,0.25);
+    }
+
+    .card-purple:hover {
+      transform: scale(1.02);
+      border-color: rgba(120,100,240,0.55);
+      background: rgba(83,74,183,0.22);
+      box-shadow: 0 0 20px rgba(83,74,183,0.2);
+    }
+
+    .card-dim {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .card-dim:hover {
+      transform: scale(1.02);
+      border-color: rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.08);
+    }
+
+    .card:active { transform: scale(0.97) !important; }
+
+    /* ─── Inputs ─── */
+    input[type="text"],
+    input[type="url"] {
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    input[type="text"]:focus,
+    input[type="url"]:focus {
+      border-color: rgba(83,74,183,0.6) !important;
+      background: rgba(255,255,255,0.09) !important;
+    }
+
+    input::placeholder { color: rgba(255,255,255,0.25); }
+
+    /* ─── Buttons ─── */
+    .btn-primary {
+      background: #534AB7;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 0;
+      width: 100%;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s ease, transform 0.1s ease;
+      margin-top: auto;
+    }
+
+    .btn-primary:hover { background: #6259d4; }
+    .btn-primary:active { transform: scale(0.97); }
+    .btn-primary:disabled { background: rgba(83,74,183,0.35); cursor: not-allowed; }
+
+    .btn-outlined {
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px;
+      padding: 9px 0;
+      width: 100%;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+      margin-top: auto;
+    }
+
+    .btn-outlined:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.22);
+    }
+
+    .btn-outlined:active { transform: scale(0.97); }
+
+    .btn-large {
+      width: 100%;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      border: none;
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    .btn-large:active { transform: scale(0.97); }
+    .btn-large:hover { filter: brightness(1.1); }
+
+    /* ─── Staggered card animations ─── */
+    [data-anim="1"] { opacity: 0; animation: fadeUp 0.3s ease 0.05s forwards; }
+    [data-anim="2"] { opacity: 0; animation: fadeUp 0.3s ease 0.15s forwards; }
+
+    /* ─── SVG stroke animation for step3a ─── */
+    #step3a.active circle {
+      animation: stroke 0.6s cubic-bezier(0.65,0,0.45,1) 0.2s forwards;
+    }
+
+    #step3a.active path {
+      animation: stroke 0.4s cubic-bezier(0.65,0,0.45,1) 0.7s forwards;
+    }
+
+    /* ─── Keyframes ─── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes iconPop {
+      from { opacity: 0; transform: scale(0.6); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes stroke {
+      to { stroke-dashoffset: 0; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <div class="steps-wrapper">
+
+    <!-- ══════════════════════════════════════
+         STEP 1 — Mode selection
+    ══════════════════════════════════════ -->
+    <div id="step1" class="step active">
+
+      <div style="display:flex; flex-direction:column; align-items:center; gap:10px; text-align:center;">
+        <div style="font-size:44px; line-height:1; animation:iconPop 0.4s cubic-bezier(0.34,1.56,0.64,1) both;">⚡</div>
+        <div style="font-size:26px; font-weight:700; letter-spacing:-0.5px;">Bienvenido a ARCA</div>
+        <div style="font-size:13px; color:rgba(255,255,255,0.4);">Tu asistente de links para agencias</div>
+      </div>
+
+      <div style="display:flex; gap:12px;">
+        <div class="card card-purple" data-anim="1" id="cardPersonal">
+          <div style="font-size:28px;">👤</div>
+          <div style="font-size:15px; font-weight:700;">Personal</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.45); line-height:1.5; flex:1;">Para uso propio</div>
+          <button class="btn-primary">Elegir</button>
+        </div>
+        <div class="card card-dim" data-anim="2" id="cardTeam">
+          <div style="font-size:28px;">👥</div>
+          <div style="font-size:15px; font-weight:700;">Equipo / Agencia</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.45); line-height:1.5; flex:1;">Para compartir con tu equipo</div>
+          <button class="btn-outlined">Elegir</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════
+         STEP 2A — Personal storage choice
+    ══════════════════════════════════════ -->
+    <div id="step2a" class="step">
+
+      <button class="btn-back" id="back2a">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Volver
+      </button>
+
+      <div style="font-size:22px; font-weight:700; letter-spacing:-0.3px;">¿Dónde guardamos tus links?</div>
+
+      <div style="display:flex; gap:12px;">
+        <div class="card card-purple" data-anim="1" id="cardLocal">
+          <div style="font-size:26px;">💻</div>
+          <div style="font-size:15px; font-weight:700;">Solo esta PC</div>
+          <div style="display:flex; flex-direction:column; gap:4px; font-size:11.5px; flex:1;">
+            <span style="color:rgba(100,220,130,0.9);">✓ Sin configurar nada</span>
+            <span style="color:rgba(100,220,130,0.9);">✓ Instantáneo</span>
+            <span style="color:rgba(100,220,130,0.9);">✓ Sin internet</span>
+            <span style="color:rgba(255,100,100,0.8);">✗ Solo en este equipo</span>
+          </div>
+          <button class="btn-primary">Usar esta PC</button>
+        </div>
+        <div class="card card-dim" data-anim="2" id="cardCloud">
+          <div style="font-size:26px;">☁️</div>
+          <div style="font-size:15px; font-weight:700;">Mi nube personal</div>
+          <div style="display:flex; flex-direction:column; gap:4px; font-size:11.5px; flex:1;">
+            <span style="color:rgba(100,220,130,0.9);">✓ Desde cualquier PC</span>
+            <span style="color:rgba(100,220,130,0.9);">✓ Nunca pierdes datos</span>
+            <span style="color:rgba(100,220,130,0.9);">✓ Gratis con Supabase</span>
+            <span style="color:rgba(255,100,100,0.8);">✗ Requiere configuración</span>
+            <span style="color:rgba(255,100,100,0.8);">✗ Necesitas internet</span>
+          </div>
+          <button class="btn-outlined">Conectar nube</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══════════════════════════════════════
+         STEP 2B — Team activation code
+    ══════════════════════════════════════ -->
+    <div id="step2b" class="step">
+
+      <button class="btn-back" id="back2b">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Volver
+      </button>
+
+      <div style="font-size:22px; font-weight:700; letter-spacing:-0.3px;">Activa tu agencia</div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="font-size:12px; font-weight:500; color:rgba(255,255,255,0.55);">Código de activación</label>
+        <input
+          type="text"
+          id="activationCode"
+          placeholder="ARCA-AGENCIA-A1B2C3"
+          spellcheck="false"
+          autocomplete="off"
+          style="width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; color:white; font-size:13px; font-family:'Consolas','Menlo',monospace; outline:none; user-select:text; -webkit-user-select:text; letter-spacing:0.5px;"
+        >
+        <div style="font-size:11px; color:rgba(255,255,255,0.3);">Tu administrador te enviará este código</div>
+      </div>
+
+      <div id="activationMsg" style="display:none; font-size:12px; padding:8px 12px; border-radius:8px;"></div>
+
+      <button class="btn-large" id="btnActivate" style="background:#534AB7; color:white;">Activar</button>
+      <button class="btn-large" id="btnEnterTeam" style="background:#534AB7; color:white; display:none;">Entrar a ARCA</button>
+
+    </div>
+
+    <!-- ══════════════════════════════════════
+         STEP 3A — Local storage confirmed
+    ══════════════════════════════════════ -->
+    <div id="step3a" class="step">
+
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; flex:1; gap:16px;">
+        <svg width="64" height="64" viewBox="0 0 52 52">
+          <circle cx="26" cy="26" r="24" fill="none" stroke="#4CAF50" stroke-width="2"
+            style="stroke-dasharray:166; stroke-dashoffset:166;"/>
+          <path fill="none" d="M14 27l7 7 17-17" stroke="#4CAF50" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round"
+            style="stroke-dasharray:48; stroke-dashoffset:48;"/>
+        </svg>
+        <div style="font-size:22px; font-weight:700; text-align:center;">¡Todo listo!</div>
+        <div style="font-size:13px; color:rgba(255,255,255,0.4); text-align:center;">Tus links se guardarán en esta PC</div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px 14px; display:flex; align-items:flex-start; gap:10px; font-size:12px; color:rgba(255,255,255,0.5); line-height:1.5;">
+        <span style="font-size:16px; flex-shrink:0;">ℹ️</span>
+        <span>Puedes cambiar esto después en Configuración</span>
+      </div>
+
+      <button class="btn-large" id="btnStartLocal" style="background:#534AB7; color:white;">Empezar a usar ARCA</button>
+
+    </div>
+
+    <!-- ══════════════════════════════════════
+         STEP 3B — Supabase credentials
+    ══════════════════════════════════════ -->
+    <div id="step3b" class="step">
+
+      <button class="btn-back" id="back3b">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Volver
+      </button>
+
+      <div style="font-size:22px; font-weight:700; letter-spacing:-0.3px;">Conecta tu Supabase</div>
+
+      <button id="btnSupabaseLink" style="background:transparent; border:none; color:rgba(83,74,183,0.9); font-size:12.5px; cursor:pointer; font-family:inherit; padding:0; text-decoration:underline; text-underline-offset:2px; text-align:left; margin-top:-12px;">
+        Crear cuenta gratis → supabase.com
+      </button>
+
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:12px; font-weight:500; color:rgba(255,255,255,0.55);">URL del proyecto</label>
+          <input
+            type="url"
+            id="supabaseUrl"
+            placeholder="https://xxxx.supabase.co"
+            spellcheck="false"
+            autocomplete="off"
+            style="width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; color:white; font-size:12.5px; font-family:'Consolas','Menlo',monospace; outline:none; user-select:text; -webkit-user-select:text;"
+          >
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="font-size:12px; font-weight:500; color:rgba(255,255,255,0.55);">Clave anon (anon public)</label>
+          <input
+            type="text"
+            id="supabaseKey"
+            placeholder="eyJhbGci..."
+            spellcheck="false"
+            autocomplete="off"
+            style="width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; color:white; font-size:12.5px; font-family:'Consolas','Menlo',monospace; outline:none; user-select:text; -webkit-user-select:text;"
+          >
+        </div>
+      </div>
+
+      <div id="supabaseMsg" style="display:none; font-size:12px; padding:8px 12px; border-radius:8px;"></div>
+
+      <button class="btn-large" id="btnVerifySupabase" style="background:#534AB7; color:white;">Verificar conexión</button>
+      <button class="btn-large" id="btnEnterSupabase" style="background:#534AB7; color:white; display:none;">Entrar a ARCA</button>
+
+    </div>
+
+  </div><!-- /.steps-wrapper -->
+
+  <!-- Progress dots -->
+  <div id="progress-dots">
+    <div class="dot" id="dot1"></div>
+    <div class="dot" id="dot2"></div>
+    <div class="dot" id="dot3"></div>
+  </div>
+
+</div><!-- /#app -->
+
+<script>
+  const { ipcRenderer, shell } = require('electron')
+  const https = require('https')
+
+  // ── Step registry ──
+  const steps = {
+    step1:  document.getElementById('step1'),
+    step2a: document.getElementById('step2a'),
+    step2b: document.getElementById('step2b'),
+    step3a: document.getElementById('step3a'),
+    step3b: document.getElementById('step3b'),
+  }
+
+  const dots = [
+    document.getElementById('dot1'),
+    document.getElementById('dot2'),
+    document.getElementById('dot3'),
+  ]
+
+  const stepDots = {
+    step1:  [1, 0, 0],
+    step2a: [1, 1, 0],
+    step2b: [1, 1, 0],
+    step3a: [1, 1, 1],
+    step3b: [1, 1, 1],
+  }
+
+  let currentStep = 'step1'
+
+  // ── Update progress dots ──
+  function updateDots(id) {
+    const p = stepDots[id] || [1, 0, 0]
+    dots.forEach((d, i) => {
+      d.style.background = p[i] ? '#534AB7' : 'rgba(255,255,255,0.15)'
+      d.style.transform  = p[i] ? 'scale(1.2)' : 'scale(1)'
+    })
+  }
+
+  // ── Navigate between steps ──
+  function goTo(nextId, direction) {
+    direction = direction || 'forward'
+    const cur = steps[currentStep]
+    const nxt = steps[nextId]
+
+    cur.classList.remove('active')
+    cur.classList.add(direction === 'forward' ? 'exit-left' : 'exit-right')
+
+    nxt.style.transition = 'none'
+    nxt.classList.remove('active', 'exit-left', 'exit-right', 'enter-right', 'enter-left')
+    nxt.classList.add(direction === 'forward' ? 'enter-right' : 'enter-left')
+
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        nxt.style.transition = ''
+        nxt.classList.remove('enter-right', 'enter-left')
+        nxt.classList.add('active')
+        setTimeout(function() {
+          cur.classList.remove('exit-left', 'exit-right')
+        }, 300)
+      })
+    })
+
+    currentStep = nextId
+    updateDots(nextId)
+
+    // Re-trigger staggered card animations
+    nxt.querySelectorAll('[data-anim]').forEach(function(el) {
+      el.style.animation = 'none'
+      el.style.opacity = '0'
+      requestAnimationFrame(function() { el.style.animation = '' })
+    })
+  }
+
+  // ══════════════════════════════════════
+  // STEP 1 — Mode selection
+  // ══════════════════════════════════════
+  document.getElementById('cardPersonal').addEventListener('click', function() {
+    goTo('step2a')
+  })
+
+  document.getElementById('cardTeam').addEventListener('click', function() {
+    goTo('step2b')
+  })
+
+  // ══════════════════════════════════════
+  // STEP 2A — Personal storage choice
+  // ══════════════════════════════════════
+  document.getElementById('back2a').addEventListener('click', function() {
+    goTo('step1', 'back')
+  })
+
+  document.getElementById('cardLocal').addEventListener('click', function() {
+    goTo('step3a')
+  })
+
+  document.getElementById('cardCloud').addEventListener('click', function() {
+    goTo('step3b')
+  })
+
+  // ══════════════════════════════════════
+  // STEP 2B — Team activation code
+  // ══════════════════════════════════════
+  document.getElementById('back2b').addEventListener('click', function() {
+    goTo('step1', 'back')
+  })
+
+  var activationMsg = document.getElementById('activationMsg')
+  var btnActivate   = document.getElementById('btnActivate')
+  var btnEnterTeam  = document.getElementById('btnEnterTeam')
+  var activatedData = null
+
+  // Auto-uppercase as user types
+  document.getElementById('activationCode').addEventListener('input', function() {
+    var pos = this.selectionStart
+    var up  = this.value.toUpperCase()
+    if (up !== this.value) {
+      this.value = up
+      this.setSelectionRange(pos, pos)
+    }
+  })
+
+  function showActivationError(msg) {
+    activationMsg.textContent = msg
+    activationMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
+    btnActivate.disabled = false
+    btnActivate.textContent = 'Activar'
+    btnActivate.style.display = 'block'
+    btnEnterTeam.style.display = 'none'
+  }
+
+  btnActivate.addEventListener('click', async function() {
+    var code = document.getElementById('activationCode').value.trim().toUpperCase()
+
+    activationMsg.style.display = 'none'
+    btnEnterTeam.style.display = 'none'
+
+    if (!code || !code.startsWith('ARCA-') || code.length < 10) {
+      showActivationError('Ingresa un código de activación válido (ej. ARCA-AGENCIA-A1B2C3).')
+      return
+    }
+
+    btnActivate.disabled = true
+    btnActivate.textContent = 'Activando...'
+
+    var primaryUrl  = 'https://arca-panel.vercel.app/api/activate'
+    var fallbackUrl = 'http://localhost:3001/api/activate'
+    var data = null
+    var status = 0
+
+    try {
+      var res = await fetch(primaryUrl, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code: code }),
+      })
+      status = res.status
+      if (res.ok) data = await res.json()
+    } catch (err) {
+      try {
+        var res2 = await fetch(fallbackUrl, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ code: code }),
+        })
+        status = res2.status
+        if (res2.ok) data = await res2.json()
+      } catch (err2) {
+        showActivationError('No se pudo conectar. Verifica tu internet.')
+        return
+      }
+    }
+
+    if (data) {
+      activatedData = data
+      activationMsg.textContent = '✓ Agencia activada correctamente'
+      activationMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(100,220,130,0.08); color:rgba(100,220,130,0.9); border:1px solid rgba(100,220,130,0.2);'
+      btnActivate.style.display = 'none'
+      btnEnterTeam.style.display = 'block'
+    } else if (status === 404) {
+      showActivationError('Código inválido. Verifica con tu administrador.')
+    } else if (status === 403) {
+      showActivationError('Esta agencia está suspendida. Contacta a tu administrador.')
+    } else {
+      showActivationError('Error inesperado (' + status + '). Inténtalo de nuevo.')
+    }
+  })
+
+  btnEnterTeam.addEventListener('click', function() {
+    if (!activatedData) return
+    ipcRenderer.send('onboarding-complete', {
+      mode:        'team',
+      storage:     'supabase',
+      supabaseUrl: activatedData.supabaseUrl,
+      supabaseKey: activatedData.supabaseKey,
+      teamId:      activatedData.teamId,
+    })
+  })
+
+  // ══════════════════════════════════════
+  // STEP 3A — Local confirmed
+  // ══════════════════════════════════════
+  document.getElementById('btnStartLocal').addEventListener('click', function() {
+    ipcRenderer.send('onboarding-complete', { mode: 'personal', storage: 'local' })
+  })
+
+  // ══════════════════════════════════════
+  // STEP 3B — Supabase credentials
+  // ══════════════════════════════════════
+  document.getElementById('btnSupabaseLink').addEventListener('click', function() {
+    shell.openExternal('https://supabase.com')
+  })
+
+  document.getElementById('back3b').addEventListener('click', function() {
+    goTo('step2a', 'back')
+  })
+
+  var supabaseMsg      = document.getElementById('supabaseMsg')
+  var btnVerifySupabase = document.getElementById('btnVerifySupabase')
+  var btnEnterSupabase  = document.getElementById('btnEnterSupabase')
+
+  function showSupabaseError() {
+    supabaseMsg.textContent = 'No se pudo conectar. Verifica tus credenciales.'
+    supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
+    btnVerifySupabase.disabled = false
+    btnVerifySupabase.textContent = 'Verificar conexión'
+  }
+
+  btnVerifySupabase.addEventListener('click', function() {
+    var rawUrl = document.getElementById('supabaseUrl').value.trim()
+    var key    = document.getElementById('supabaseKey').value.trim()
+
+    supabaseMsg.style.display = 'none'
+    btnEnterSupabase.style.display = 'none'
+
+    if (!rawUrl || !key) {
+      supabaseMsg.textContent = 'Completa todos los campos.'
+      supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
+      return
+    }
+
+    var hostname
+    try {
+      hostname = new URL(rawUrl).hostname
+    } catch (e) {
+      supabaseMsg.textContent = 'URL inválida.'
+      supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
+      return
+    }
+
+    btnVerifySupabase.disabled = true
+    btnVerifySupabase.textContent = 'Verificando...'
+
+    var req = https.request({
+      hostname: hostname,
+      path: '/rest/v1/',
+      method: 'GET',
+      timeout: 8000,
+      headers: {
+        'apikey': key,
+        'Authorization': 'Bearer ' + key
+      }
+    }, function(res) {
+      if (res.statusCode >= 200 && res.statusCode < 500) {
+        supabaseMsg.textContent = '✓ Conexión exitosa'
+        supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(100,220,130,0.08); color:rgba(100,220,130,0.9); border:1px solid rgba(100,220,130,0.2);'
+        btnVerifySupabase.style.display = 'none'
+        btnEnterSupabase.style.display = 'block'
+      } else {
+        showSupabaseError()
+      }
+      res.resume()
+    })
+
+    req.on('error', showSupabaseError)
+    req.on('timeout', function() { req.destroy(); showSupabaseError() })
+    req.end()
+  })
+
+  btnEnterSupabase.addEventListener('click', function() {
+    ipcRenderer.send('onboarding-complete', {
+      mode: 'personal',
+      storage: 'supabase',
+      supabaseUrl: document.getElementById('supabaseUrl').value.trim(),
+      supabaseKey: document.getElementById('supabaseKey').value.trim(),
+    })
+  })
+
+  // ── Init ──
+  updateDots('step1')
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "name": "arca-desktop",
+  "version": "0.1.0",
+  "description": "ARCA — Asistente de Archivos para Agencias (Desktop)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.0"
+  },
+  "build": {
+    "appId": "com.arca.desktop",
+    "productName": "ARCA",
+    "copyright": "ARCA — Agencia",
+    "files": [
+      "main.js",
+      "tray.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../arca-app/public/icon-192.png",
+        "to": "tray-icon.png"
+      }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "../arca-app/public/icon-512.png"
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "icon": "../arca-app/public/icon-512.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "../arca-app/public/icon-512.png",
+      "category": "Utility"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    }
+  }
+}

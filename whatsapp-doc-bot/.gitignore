@@ -1,0 +1,23 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (contienen credenciales)
+.env
+
+# Sesión de WhatsApp (contiene credenciales de la cuenta)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Python (del proyecto anterior)
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
