@@ -11,7 +11,9 @@
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
   },
-  "dependencies": {},
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "electron": "^29.0.0",
     "electron-builder": "^24.9.0"
@@ -23,25 +25,76 @@
     "files": [
       "main.js",
       "tray.js",
-      "preload.js"
+      "preload.js",
+      "preload-onboarding.js",
+      "onboarding.html"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "Wolf-Negro",
+      "repo": "ARCA"
+    },
     "extraResources": [
       {
         "from": "../arca-app/public/icon-192.png",
         "to": "tray-icon.png"
+      },
+      {
+        "from": "../arca-app/.next/standalone",
+        "to": "app",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../arca-app/.next/static",
+        "to": "app/.next/static",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../arca-app/public",
+        "to": "app/public",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "icon": "../arca-app/public/icon-512.png"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../arca-app/public/icon-512.png",
+      "extraResources": [
+        {
+          "from": "C:/Program Files/nodejs/node.exe",
+          "to": "node/node.exe"
+        }
+      ]
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "icon": "../arca-app/public/icon-512.png",
       "category": "public.app-category.productivity"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "../arca-app/public/icon-512.png",
       "category": "Utility"
     },

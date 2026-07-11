@@ -145,16 +145,18 @@ function EditForm({ doc, onSave, onCancel }: EditFormProps) {
 
 interface DocCardProps {
   doc: Document
-  onDeleted: (id: string) => void
-  onUpdated: (updated: Document) => void
+  onDeleted:    (id: string) => void
+  onUpdated:    (updated: Document) => void
+  onPinToggled: (updated: Document) => void
 }
 
-function DocCard({ doc, onDeleted, onUpdated }: DocCardProps) {
+function DocCard({ doc, onDeleted, onUpdated, onPinToggled }: DocCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing]             = useState(false)
   const [deleting, setDeleting]           = useState(false)
   const [copied, setCopied]               = useState(false)
   const [hovered, setHovered]             = useState(false)
+  const [pinning, setPinning]             = useState(false)
 
   async function handleDelete() {
     setDeleting(true)
@@ -202,6 +204,17 @@ function DocCard({ doc, onDeleted, onUpdated }: DocCardProps) {
     }
   }
 
+  async function handlePinToggle() {
+    setPinning(true)
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/pin`, { method: 'POST' })
+      const updated = await res.json() as Document
+      onPinToggled(updated)
+    } catch { /* ignore */ } finally {
+      setPinning(false)
+    }
+  }
+
   const emoji = getDocEmoji(doc.doc_type)
 
   return (
@@ -214,13 +227,16 @@ function DocCard({ doc, onDeleted, onUpdated }: DocCardProps) {
       onMouseLeave={() => setHovered(false)}
       style={{
         background:   hovered ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)',
-        border:       '1px solid rgba(255,255,255,0.08)',
+        border:       doc.pinned
+          ? '1px solid rgba(255,200,0,0.28)'
+          : '1px solid rgba(255,255,255,0.08)',
         borderRadius: 10,
         padding:      '12px 14px',
         display:      'flex',
         flexDirection: 'column',
         gap:          6,
         transition:   'all 200ms ease',
+        boxShadow:    doc.pinned ? '0 0 0 1px rgba(255,200,0,0.06) inset' : 'none',
       }}
     >
       {/* Title row */}
@@ -254,6 +270,25 @@ function DocCard({ doc, onDeleted, onUpdated }: DocCardProps) {
             </span>
           </div>
         </div>
+        {/* Pin button */}
+        <button
+          onClick={handlePinToggle}
+          disabled={pinning}
+          title={doc.pinned ? 'Desfijar' : 'Fijar'}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            cursor: pinning ? 'default' : 'pointer',
+            fontSize: 14,
+            color: doc.pinned ? 'rgba(255,200,0,0.9)' : 'rgba(255,255,255,0.2)',
+            padding: '2px 4px',
+            flexShrink: 0,
+            transition: 'color 0.2s',
+            opacity: hovered || doc.pinned ? 1 : 0,
+          }}
+        >
+          {doc.pinned ? '📌' : '📍'}
+        </button>
         <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10, flexShrink: 0, whiteSpace: 'nowrap' }}>
           {formatDate(doc.created_at)}
         </span>
@@ -433,7 +468,14 @@ export function LibraryView({ isOpen, onClose, initialClientFilter, initialDocTy
     setDocs((prev) => prev.map((d) => d.id === updated.id ? updated : d))
   }
 
+  function handlePinToggled(updated: Document) {
+    setDocs((prev) => prev.map((d) => d.id === updated.id ? updated : d))
+  }
+
   const hasFilters = search || clientFilter || docTypeFilter
+
+  const pinnedDocs   = docs.filter(d => d.pinned)
+  const unpinnedDocs = docs.filter(d => !d.pinned)
 
   return (
     <AnimatePresence>
@@ -647,12 +689,50 @@ export function LibraryView({ isOpen, onClose, initialClientFilter, initialDocTy
               )}
 
               <AnimatePresence>
-                {docs.map((doc) => (
+                {/* Pinned section */}
+                {pinnedDocs.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      color: 'rgba(255,200,0,0.5)',
+                      padding: '0 2px 6px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}>
+                      <span>📌</span> Fijados
+                    </div>
+                    {pinnedDocs.map((doc) => (
+                      <DocCard
+                        key={doc.id}
+                        doc={doc}
+                        onDeleted={handleDeleted}
+                        onUpdated={handleUpdated}
+                        onPinToggled={handlePinToggled}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Divider */}
+                {pinnedDocs.length > 0 && unpinnedDocs.length > 0 && (
+                  <div style={{
+                    height: 1,
+                    background: 'rgba(255,255,255,0.06)',
+                    margin: '4px 0 12px',
+                  }} />
+                )}
+
+                {unpinnedDocs.map((doc) => (
                   <DocCard
                     key={doc.id}
                     doc={doc}
                     onDeleted={handleDeleted}
                     onUpdated={handleUpdated}
+                    onPinToggled={handlePinToggled}
                   />
                 ))}
               </AnimatePresence>

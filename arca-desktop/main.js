@@ -4,8 +4,12 @@ const {
   app, BrowserWindow, globalShortcut,
   screen, ipcMain, shell, session, clipboard, systemPreferences,
 } = require('electron')
-const path = require('path')
-const fs   = require('fs')
+const path  = require('path')
+const fs    = require('fs')
+const http  = require('http')
+const https = require('https')
+const { spawn, exec } = require('child_process')
+const { autoUpdater } = require('electron-updater')
 const { createTray } = require('./tray')
 
 // Allow audio autoplay without a user gesture (needed for ElevenLabs TTS via new Audio())
@@ -18,7 +22,8 @@ const ORB_SIZE      = 150           // orb-only mode
 const PANEL_W       = 420           // panel width
 const PANEL_H       = 650           // panel height
 const WIN_MARGIN    = 10            // screen-edge margin
-const NEXT_URL      = 'http://localhost:3000'
+const DEFAULT_PORT  = 3000
+let   NEXT_URL       = `http://localhost:${DEFAULT_PORT}`   // reassigned once the real port is known
 const INITIAL_DELAY = 5000          // ms — wait for Next.js to compile
 const RETRY_MS      = 3000          // ms — between retry attempts
 const MAX_RETRIES   = 20
@@ -27,6 +32,7 @@ const MAX_RETRIES   = 20
 /** @type {import('electron').Tray|null} */ let tray = null
 /** @type {BrowserWindow|null} */ let authWin = null
 /** @type {BrowserWindow|null} */ let onboardingWin = null
+/** @type {import('child_process').ChildProcess|null} */ let nextServerProcess = null
 let retryCount  = 0
 let loadTimer   = null
 let isQuitting  = false
@@ -106,6 +112,164 @@ function displayForWindow() {
     }
   }
   return screen.getPrimaryDisplay()
+}
+
+// ── Bundled Next.js server ─────────────────────────────────────────────────────
+// arca-desktop owns the arca-app server's lifecycle end-to-end: nobody should
+// ever need to run `npm run dev` by hand for ARCA to work.
+//
+// Port selection deliberately does NOT use a separate "probe socket, then
+// spawn the real server" strategy: Windows allows a wildcard (0.0.0.0) bind
+// and a loopback-only (127.0.0.1) bind to coexist on the very same port
+// without erroring, in either direction — so a probe can report a port as
+// free when it truly isn't (confirmed in testing, twice, against two
+// different unrelated local dev servers). Instead we spawn the REAL server on
+// a candidate port and watch whether it survives its own startup window; an
+// occupied port makes it exit almost immediately with EADDRINUSE, in which
+// case we retry on the next port.
+
+function buildServerEnv(port) {
+  return {
+    ...process.env,
+    PORT:     String(port),
+    HOSTNAME: '127.0.0.1',
+    ARCA_DB_PATH: path.join(app.getPath('userData'), 'arca-data', 'arca.db'),
+  }
+}
+
+/** stdio target that logs the server's stdout/stderr to userData/server.log —
+ *  a packaged GUI app has no attached console, so this is the only way to
+ *  diagnose a startup failure (and doubles as an ongoing support artifact). */
+function serverLogStdio() {
+  try {
+    const logPath = path.join(app.getPath('userData'), 'server.log')
+    const fd = fs.openSync(logPath, 'a')
+    return ['ignore', fd, fd]
+  } catch (err) {
+    console.error('[ARCA] Could not open server.log:', err)
+    return 'ignore'
+  }
+}
+
+function spawnServer(port) {
+  const env   = buildServerEnv(port)
+  const stdio = serverLogStdio()
+
+  if (app.isPackaged) {
+    // Standalone Next.js build bundled via electron-builder's extraResources
+    // (see package.json → build.extraResources). Run it with a bundled real
+    // Node.js binary (also an extraResource), NOT Electron's own Node runtime
+    // (ELECTRON_RUN_AS_NODE): Electron embeds a different Node ABI than the
+    // system Node used to `npm install` arca-app, so native modules like
+    // better-sqlite3 crash with a NODE_MODULE_VERSION mismatch under
+    // ELECTRON_RUN_AS_NODE. Bundling the same real Node.js binary sidesteps
+    // that entirely — no per-platform native rebuild step needed.
+    const serverEntry = path.join(process.resourcesPath, 'app', 'server.js')
+    const nodeBinary   = path.join(process.resourcesPath, 'node', 'node.exe')
+    return spawn(nodeBinary, [serverEntry], {
+      cwd:      path.join(process.resourcesPath, 'app'),
+      env,
+      stdio,
+      detached: process.platform !== 'win32',
+    })
+  }
+
+  // Dev: run the arca-app source directly with the local `next` binary.
+  const arcaAppDir = path.join(__dirname, '..', 'arca-app')
+  const nextBin     = path.join(arcaAppDir, 'node_modules', '.bin', process.platform === 'win32' ? 'next.cmd' : 'next')
+  return spawn(nextBin, ['dev', '-p', String(port)], {
+    cwd:      arcaAppDir,
+    env,
+    stdio,
+    detached: process.platform !== 'win32',
+  })
+}
+
+/** Resolves true only if the response from 127.0.0.1:port carries our own
+ *  app's marker header (see next.config.js → headers()) — proof that WE are
+ *  the ones actually answering on this port, not just that our bind() call
+ *  happened not to error. */
+function verifyArcaResponding(port, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: timeoutMs }, (res) => {
+      res.resume()
+      resolve(res.headers['x-arca-app'] === '1')
+    })
+    req.on('error',   () => resolve(false))
+    req.on('timeout', () => { req.destroy(); resolve(false) })
+  })
+}
+
+function killChildProcess(child) {
+  if (!child || child.killed) return
+  const pid = child.pid
+  if (process.platform === 'win32') {
+    // child.kill() alone doesn't reliably reach the whole process tree on
+    // Windows (next dev / next start can spawn workers) — force-kill the tree.
+    exec(`taskkill /pid ${pid} /t /f`, () => {})
+  } else {
+    try { process.kill(-pid, 'SIGTERM') } catch { try { child.kill('SIGTERM') } catch {} }
+  }
+}
+
+function trySpawnOnPort(port) {
+  return new Promise((resolve) => {
+    const child = spawnServer(port)
+    let settled = false
+
+    const onEarlyExit = () => {
+      if (settled) return
+      settled = true
+      resolve(false)
+    }
+    child.once('exit', onEarlyExit)
+    child.once('error', onEarlyExit)
+
+    // Next.js standalone typically reports ready within ~100-300ms; an
+    // EADDRINUSE crash happens within milliseconds of spawn. 2s is a
+    // generous margin to tell the two apart without slowing startup much.
+    setTimeout(async () => {
+      if (settled) return
+
+      // Our own listen() may have "succeeded" even though another process
+      // already owns this port (see the comment above startNextServer) — the
+      // only real proof is getting our own marker header back.
+      const verified = await verifyArcaResponding(port)
+      if (settled) return   // the child exited while we were checking
+
+      settled = true
+      child.removeListener('exit', onEarlyExit)
+      child.removeListener('error', onEarlyExit)
+
+      if (!verified) {
+        console.warn(`[ARCA] Port ${port} answered but not from our server — releasing it`)
+        killChildProcess(child)
+        resolve(false)
+        return
+      }
+
+      nextServerProcess = child
+      nextServerProcess.on('error', (err) => console.error('[ARCA] Bundled server error:', err))
+      nextServerProcess.on('exit', (code, signal) => {
+        if (!isQuitting) console.warn(`[ARCA] Bundled server exited unexpectedly (code=${code}, signal=${signal})`)
+        nextServerProcess = null
+      })
+      resolve(true)
+    }, 2000)
+  })
+}
+
+async function startNextServer(startPort, maxAttempts = 20) {
+  for (let port = startPort; port < startPort + maxAttempts; port++) {
+    if (await trySpawnOnPort(port)) return port
+    console.warn(`[ARCA] Port ${port} unavailable, trying ${port + 1}...`)
+  }
+  throw new Error(`Could not start the bundled server on any port in range ${startPort}-${startPort + maxAttempts - 1}`)
+}
+
+function stopNextServer() {
+  killChildProcess(nextServerProcess)
+  nextServerProcess = null
 }
 
 // ── Window factory ────────────────────────────────────────────────────────────
@@ -238,8 +402,10 @@ function createOnboardingWindow() {
     alwaysOnTop:     true,
     skipTaskbar:     false,
     webPreferences: {
-      nodeIntegration:  true,
-      contextIsolation: false,
+      preload:          path.join(__dirname, 'preload-onboarding.js'),
+      contextIsolation: true,
+      nodeIntegration:  false,
+      sandbox:          true,
     },
   })
   onboardingWin.loadFile(path.join(__dirname, 'onboarding.html'))
@@ -287,6 +453,13 @@ function registerShortcuts() {
     setTimeout(() => win.webContents.send('activate-voice'), 120)
   })
   if (!ok2) console.warn('[ARCA] Ctrl+Shift+V taken by another app')
+
+  const ok3 = globalShortcut.register('Alt+Space', () => {
+    if (!win) return
+    if (!win.isVisible()) { win.show(); win.focus() }
+    win.webContents.send('spotlight-toggle')
+  })
+  if (!ok3) console.warn('[ARCA] Alt+Space taken by another app')
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────────
@@ -392,6 +565,65 @@ function registerIPC() {
     }
   })
 
+  // ── Spotlight open/close — centered on screen ──────────────────────────────
+  ipcMain.on('spotlight-toggle', (_event, isOpen) => {
+    if (!win) return
+    const display = displayForWindow()
+    const { x: dx, y: dy, width: dw, height: dh } = display.workArea
+
+    if (isOpen) {
+      const [wx, wy] = win.getPosition()
+      if (savedOrbX === null) {
+        savedOrbX = wx
+        savedOrbY = wy
+      }
+
+      win.setMinimumSize(600, 400)
+      const newX = Math.round(dx + (dw - 600) / 2)
+      const newY = Math.round(dy + (dh - 400) / 2)
+      win.setBounds({ x: newX, y: newY, width: 600, height: 400 }, false)
+      win.show()
+      win.focus()
+    } else {
+      win.setMinimumSize(ORB_SIZE, ORB_SIZE)
+      const x = savedOrbX ?? (dx + dw - ORB_SIZE - WIN_MARGIN)
+      const y = savedOrbY ?? (dy + dh - ORB_SIZE - WIN_MARGIN)
+      savedOrbX = null
+      savedOrbY = null
+      win.setBounds({ x, y, width: ORB_SIZE, height: ORB_SIZE }, false)
+      savePosition()
+    }
+  })
+
+  // ── Toast notification open/close ──────────────────────────────────────────
+  ipcMain.on('toast-toggle', (_event, isOpen) => {
+    if (!win) return
+    const display = displayForWindow()
+    const { x: dx, y: dy, width: dw, height: dh } = display.workArea
+
+    if (isOpen) {
+      const [wx, wy] = win.getPosition()
+      if (savedOrbX === null) {
+        savedOrbX = wx
+        savedOrbY = wy
+      }
+
+      win.setMinimumSize(320, 120)
+      const newX = dx + dw - 320 - WIN_MARGIN
+      const newY = dy + dh - 120 - WIN_MARGIN
+      win.setBounds({ x: newX, y: newY, width: 320, height: 120 }, false)
+      win.show()
+    } else {
+      win.setMinimumSize(ORB_SIZE, ORB_SIZE)
+      const x = savedOrbX ?? (dx + dw - ORB_SIZE - WIN_MARGIN)
+      const y = savedOrbY ?? (dy + dh - ORB_SIZE - WIN_MARGIN)
+      savedOrbX = null
+      savedOrbY = null
+      win.setBounds({ x, y, width: ORB_SIZE, height: ORB_SIZE }, false)
+      savePosition()
+    }
+  })
+
   // ── Google OAuth popup ───────────────────────────────────────────────────
   ipcMain.on('open-auth', () => {
     // Prevent multiple auth windows if user clicks the button twice
@@ -459,6 +691,7 @@ function registerIPC() {
     win = createWindow(null)
     tray = createTray(win)
     registerShortcuts()
+    startClipboardPoll()
   })
 
   ipcMain.on('reset-onboarding', () => {
@@ -468,6 +701,55 @@ function registerIPC() {
   })
 
   ipcMain.handle('get-config', () => loadConfig())
+
+  // ── Onboarding: verify a user-supplied Supabase project (runs the HTTPS
+  // request in main so onboarding.html never needs raw Node `https` access) ──
+  ipcMain.handle('verify-supabase', (_event, payload) => {
+    const hostname = payload?.hostname
+    const key      = payload?.key
+    return new Promise((resolve) => {
+      if (typeof hostname !== 'string' || !hostname || typeof key !== 'string' || !key) {
+        resolve({ ok: false })
+        return
+      }
+      const req = https.request({
+        hostname,
+        path:    '/rest/v1/',
+        method:  'GET',
+        timeout: 8000,
+        headers: {
+          apikey:        key,
+          Authorization: 'Bearer ' + key,
+        },
+      }, (res) => {
+        res.resume()
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 500, statusCode: res.statusCode })
+      })
+      req.on('error',   () => resolve({ ok: false }))
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false }) })
+      req.end()
+    })
+  })
+}
+
+let lastClipboardUrl = ''
+function startClipboardPoll() {
+  setInterval(() => {
+    try {
+      const text = clipboard.readText().trim()
+      if (!text) return
+      if (/^https?:\/\/[^\s]+$/i.test(text)) {
+        if (text !== lastClipboardUrl) {
+          lastClipboardUrl = text
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('clipboard-detected', text)
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }, 1500)
 }
 
 // ── Microphone / media permissions ───────────────────────────────────────────
@@ -565,18 +847,39 @@ app.whenReady().then(async () => {
   }
 
   registerIPC()
+
+  // Start arca-app's own server before loading any window into it, retrying
+  // on the next port if one is already taken by another local project.
+  const port = await startNextServer(DEFAULT_PORT).catch((err) => {
+    console.error('[ARCA] Could not start bundled server:', err)
+    return DEFAULT_PORT
+  })
+  NEXT_URL = `http://localhost:${port}`
+
   const config = loadConfig()
   if (config) {
     win  = createWindow(savedBounds)
     tray = createTray(win)
     registerShortcuts()
+    startClipboardPoll()
   } else {
     createOnboardingWindow()
+  }
+
+  // ── Auto-update check ──────────────────────────────────────────────────
+  // Never let a failed update check (offline, no published releases yet,
+  // unsigned build, etc.) block or crash app startup.
+  try {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.warn('[ARCA] Auto-update check failed:', err?.message || err)
+    })
+  } catch (err) {
+    console.warn('[ARCA] Auto-update check failed:', err?.message || err)
   }
 })
 
 app.on('will-quit',         () => globalShortcut.unregisterAll())
-app.on('before-quit',       () => { isQuitting = true })
+app.on('before-quit',       () => { isQuitting = true; stopNextServer() })
 app.on('activate',          () => {
   if (BrowserWindow.getAllWindows().length === 0) win = createWindow()
   else { win?.show(); win?.focus() }

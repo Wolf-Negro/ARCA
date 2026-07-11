@@ -68,9 +68,12 @@ export default function DashboardPage() {
     if (res.ok) setAgencies(prev => prev.filter(a => a.id !== id))
   }
 
-  function handleLogout() {
-    document.cookie = 'arca-panel-token=; path=/; max-age=0; SameSite=Lax'
-    router.push('/login')
+  async function handleLogout() {
+    try {
+      await fetch('/api/logout', { method: 'POST' })
+    } finally {
+      router.push('/login')
+    }
   }
 
   function handleCreated(agency: Agency) {

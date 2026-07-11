@@ -1,3 +1,4 @@
+import dns from 'dns'
 import { extractTextFromImageUrl } from './metadata'
 
 export class UrlValidationError extends Error {
@@ -165,11 +166,29 @@ const BLOCKED_HOSTNAME = [
   /\.local$/i,
 ]
 
-function assertSafeUrl(url: string): void {
+function isBlockedAddress(value: string): boolean {
+  return BLOCKED_HOSTNAME.some(r => r.test(value))
+}
+
+// Validates that a URL is safe to fetch server-side: rejects hostnames that are
+// literally private/internal, AND resolves DNS to reject public-looking domains
+// that point at a private/loopback/link-local IP (DNS rebinding protection).
+export async function assertSafeUrl(url: string): Promise<void> {
   let parsed: URL
   try { parsed = new URL(url) } catch { throw new UrlValidationError('URL inválida') }
   const h = parsed.hostname.toLowerCase()
-  if (BLOCKED_HOSTNAME.some(r => r.test(h))) {
+  if (isBlockedAddress(h)) {
+    throw new UrlValidationError('URL apunta a una dirección privada o interna')
+  }
+
+  let addresses: { address: string }[]
+  try {
+    addresses = await dns.promises.lookup(h, { all: true })
+  } catch {
+    throw new UrlValidationError('No se pudo resolver el dominio')
+  }
+
+  if (addresses.length === 0 || addresses.some(a => isBlockedAddress(a.address))) {
     throw new UrlValidationError('URL apunta a una dirección privada o interna')
   }
 }
@@ -179,7 +198,7 @@ export async function fetchUrlContent(url: string): Promise<FetchedUrlResult> {
     throw new UrlValidationError('URL inválida: debe comenzar con http:// o https://')
   }
 
-  assertSafeUrl(url)
+  await assertSafeUrl(url)
 
   // Fast-path: services that require login return no useful HTML content.
   // Skip the expensive HEAD + GET and let the URL pattern drive metadata extraction.

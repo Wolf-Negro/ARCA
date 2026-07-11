@@ -1,28 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createSessionToken, safeCompare, SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from '@/lib/session'
 
 export async function POST(req: NextRequest) {
   try {
     const { password } = await req.json()
     const adminPassword = process.env.PANEL_ADMIN_PASSWORD
 
-    if (!adminPassword) {
+    if (!adminPassword || !process.env.PANEL_SESSION_SECRET) {
       return NextResponse.json({ error: 'Servidor no configurado' }, { status: 500 })
     }
 
-    if (!password || password !== adminPassword) {
+    if (!password || typeof password !== 'string' || !safeCompare(password, adminPassword)) {
       return NextResponse.json({ error: 'Contraseña incorrecta' }, { status: 401 })
     }
 
-    const token = Buffer.from(
-      JSON.stringify({ exp: Date.now() + 86_400_000, hash: Buffer.from(adminPassword).toString('base64') }),
-    ).toString('base64')
+    const token = createSessionToken()
 
     const res = NextResponse.json({ success: true })
-    res.cookies.set('arca-panel-token', token, {
-      httpOnly: false,
+    res.cookies.set(SESSION_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path:     '/',
-      maxAge:   86_400,
+      maxAge:   SESSION_MAX_AGE_SECONDS,
     })
     return res
   } catch (err) {

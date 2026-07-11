@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
+import { isAllowedFile } from '@/lib/uploadValidation'
 
 const UPLOADS_DIR = join(process.cwd(), 'arca-data', 'uploads')
 
@@ -17,6 +18,10 @@ export async function POST(req: NextRequest) {
 
     if (typeof base64 !== 'string' || base64.length > MAX_BASE64_CHARS) {
       return NextResponse.json({ error: 'El archivo excede el límite de 10 MB' }, { status: 413 })
+    }
+
+    if (typeof filename !== 'string' || typeof mimeType !== 'string' || !isAllowedFile(filename, mimeType)) {
+      return NextResponse.json({ error: 'Tipo de archivo no permitido' }, { status: 400 })
     }
 
     if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true })

@@ -3,6 +3,7 @@ import { mkdirSync, existsSync } from 'fs'
 import { dirname, resolve } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMetadata } from './metadata'
+import { runBackup } from './backup'
 
 // ─── Team mode config (set by /api/init-team) ─────────────────────────────────
 
@@ -47,6 +48,8 @@ function rowToDocFromSupabase(row: any): Document {
     raw_content: row.raw_content ?? null,
     mode:        row.mode ?? 'team',
     team_id:     row.team_id ?? null,
+    pinned:      row.pinned ?? 0,
+    synced:      row.synced ?? 1,
   }
 }
 
@@ -63,6 +66,8 @@ export interface Document {
   raw_content: string | null
   mode:        string
   team_id:     string | null
+  pinned:      number
+  synced:      number
 }
 
 // ─── DB singleton ─────────────────────────────────────────────────────────────
@@ -101,17 +106,35 @@ function getDb(): Database.Database {
       mime_type   TEXT,
       raw_content TEXT,
       mode        TEXT NOT NULL DEFAULT 'personal',
-      team_id     TEXT
+      team_id     TEXT,
+      pinned      INTEGER DEFAULT 0,
+      synced      INTEGER DEFAULT 1
     );
     CREATE INDEX IF NOT EXISTS idx_client  ON documents(client_name);
     CREATE INDEX IF NOT EXISTS idx_created ON documents(created_at DESC);
   `)
 
+  // Safe migrations for existing databases
+  try {
+    db.exec(`ALTER TABLE documents ADD COLUMN pinned INTEGER DEFAULT 0`)
+  } catch (err) {}
+  try {
+    db.exec(`ALTER TABLE documents ADD COLUMN synced INTEGER DEFAULT 1`)
+  } catch (err) {}
+
+  // Best-effort backup of the DB file, once per process startup. Never
+  // allowed to block or crash initialization.
+  try {
+    runBackup()
+  } catch (err) {
+    console.error('[backup] runBackup failed', err)
+  }
+
   stmtInsert = db.prepare(`
     INSERT INTO documents
-      (id, created_at, client_name, doc_type, description, tags, file_url, file_name, mime_type, raw_content, mode, team_id)
+      (id, created_at, client_name, doc_type, description, tags, file_url, file_name, mime_type, raw_content, mode, team_id, pinned, synced)
     VALUES
-      (@id, @created_at, @client_name, @doc_type, @description, @tags, @file_url, @file_name, @mime_type, @raw_content, @mode, @team_id)
+      (@id, @created_at, @client_name, @doc_type, @description, @tags, @file_url, @file_name, @mime_type, @raw_content, @mode, @team_id, @pinned, @synced)
   `)
 
   stmtSelectById = db.prepare(`SELECT * FROM documents WHERE id = ?`)
@@ -126,11 +149,13 @@ function getDb(): Database.Database {
         doc_type    = @doc_type,
         description = @description,
         tags        = @tags,
-        file_name   = @file_name
+        file_name   = @file_name,
+        pinned      = @pinned,
+        synced      = @synced
     WHERE id = @id
   `)
 
-  stmtSelectAll = db.prepare(`SELECT * FROM documents ORDER BY created_at DESC`)
+  stmtSelectAll = db.prepare(`SELECT * FROM documents WHERE synced != -1 ORDER BY pinned DESC, created_at DESC`)
 
   return db
 }
@@ -167,6 +192,8 @@ function rowToDoc(row: any): Document {
     raw_content: row.raw_content ?? null,
     mode:        row.mode ?? 'personal',
     team_id:     row.team_id ?? null,
+    pinned:      row.pinned ?? 0,
+    synced:      row.synced ?? 1,
   }
 }
 
@@ -197,6 +224,7 @@ export function saveDocument(
   rawContent?: string
 ): Document {
   getDb()
+  const mode = getMode()
   const doc: Document = {
     id:          uuidv4(),
     created_at:  new Date().toISOString(),
@@ -208,8 +236,10 @@ export function saveDocument(
     file_name:   metadata.file_name,
     mime_type:   mimeType   ?? null,
     raw_content: rawContent ?? null,
-    mode:        'personal',
-    team_id:     null,
+    mode:        mode,
+    team_id:     mode === 'team' ? _teamId : null,
+    pinned:      0,
+    synced:      mode === 'team' ? 0 : 1,
   }
   stmtInsert.run({
     id:          doc.id,
@@ -224,8 +254,15 @@ export function saveDocument(
     raw_content: doc.raw_content,
     mode:        doc.mode,
     team_id:     doc.team_id,
+    pinned:      doc.pinned,
+    synced:      doc.synced,
   })
   invalidateCache()
+
+  if (mode === 'team') {
+    triggerBackgroundSync().catch(() => {})
+  }
+
   return doc
 }
 
@@ -245,12 +282,18 @@ export function searchDocuments(
   if (clientFilter)  docs = docs.filter(d => d.client_name?.toLowerCase().includes(clientFilter.toLowerCase()))
   if (docTypeFilter) { const f = docTypeFilter.toLowerCase(); docs = docs.filter(d => d.doc_type.toLowerCase().includes(f)) }
   if (q)             docs = docs.filter(d => textMatches(d, q))
-  return docs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return docs.sort((a, b) => {
+    if (a.pinned !== b.pinned) return b.pinned - a.pinned
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
 }
 
 export function listRecentDocuments(limit: number, clientFilter?: string): Document[] {
   let docs = Array.from(loadCache().values())
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return b.pinned - a.pinned
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
   if (clientFilter) docs = docs.filter(d => d.client_name?.toLowerCase().includes(clientFilter.toLowerCase()))
   return docs.slice(0, limit)
 }
@@ -267,7 +310,10 @@ export function listDocumentsByDate(date: 'today' | 'yesterday', clientFilter?: 
     return !isNaN(t) && t >= from.getTime() && t < to.getTime()
   })
   if (clientFilter) docs = docs.filter(d => d.client_name?.toLowerCase().includes(clientFilter.toLowerCase()))
-  return docs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return docs.sort((a, b) => {
+    if (a.pinned !== b.pinned) return b.pinned - a.pinned
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
 }
 
 export function countDocuments(clientFilter?: string): number {
@@ -284,7 +330,10 @@ export function listAllDocuments(
   docTypeFilter?: string
 ): { docs: Document[]; total: number } {
   let docs = Array.from(loadCache().values())
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return b.pinned - a.pinned
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
   if (search)        { const q = search.toLowerCase();       docs = docs.filter(d => textMatches(d, q)) }
   if (clientFilter)  { docs = docs.filter(d => d.client_name === clientFilter) }
   if (docTypeFilter) { const f = docTypeFilter.toLowerCase(); docs = docs.filter(d => d.doc_type.toLowerCase().includes(f)) }
@@ -295,19 +344,29 @@ export function listAllDocuments(
 
 export function deleteDocument(id: string): void {
   getDb()
-  stmtDeleteById.run(id)
-  invalidateCache()
+  const mode = getMode()
+  if (mode === 'team') {
+    getDb().prepare(`UPDATE documents SET synced = -1 WHERE id = ?`).run(id)
+    invalidateCache()
+    triggerBackgroundSync().catch(() => {})
+  } else {
+    stmtDeleteById.run(id)
+    invalidateCache()
+  }
 }
 
 export function updateDocument(
   id:      string,
-  updates: Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name'>>
+  updates: Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name' | 'pinned'>>
 ): Document {
   const c   = loadCache()
   const doc = c.get(id)
   if (!doc) throw new Error('Documento no encontrado')
 
   const merged = { ...doc, ...updates }
+  const mode = getMode()
+  const synced = mode === 'team' ? 0 : 1
+
   stmtUpdate.run({
     id:          id,
     client_name: merged.client_name,
@@ -315,8 +374,14 @@ export function updateDocument(
     description: merged.description,
     tags:        JSON.stringify(merged.tags),
     file_name:   merged.file_name,
+    pinned:      merged.pinned ?? doc.pinned,
+    synced:      synced,
   })
   invalidateCache()
+
+  if (mode === 'team') {
+    triggerBackgroundSync().catch(() => {})
+  }
 
   // Reload from DB to return authoritative state
   const row = stmtSelectById.get(id) as any
@@ -528,5 +593,124 @@ export async function getStatsAsync(): Promise<{
     total:    rows.length,
     byClient: Array.from(clientMap.entries()).map(([client_name, count]) => ({ client_name, count })).sort((a,b) => b.count - a.count),
     byType:   Array.from(typeMap.entries()).map(([doc_type, count]) => ({ doc_type, count })).sort((a,b) => b.count - a.count),
+  }
+}
+
+export async function triggerBackgroundSync(): Promise<void> {
+  if (getMode() !== 'team') return
+
+  // 1. Push pending creations/updates (synced = 0)
+  const pendingUpdates = getDb().prepare(`SELECT * FROM documents WHERE synced = 0`).all() as any[]
+  for (const row of pendingUpdates) {
+    const doc = rowToDoc(row)
+    try {
+      // Check if exists in Supabase
+      const checkRes = await fetch(supabaseUrl(`documents?id=eq.${doc.id}`), {
+        headers: supabaseHeaders(),
+      })
+      const exists = checkRes.ok && (await checkRes.json()).length > 0
+      
+      const payload = {
+        id:          doc.id,
+        created_at:  doc.created_at,
+        client_name: doc.client_name,
+        doc_type:    doc.doc_type,
+        description: doc.description,
+        tags:        doc.tags,
+        file_url:    doc.file_url,
+        file_name:   doc.file_name,
+        mime_type:   doc.mime_type,
+        raw_content: doc.raw_content,
+        mode:        doc.mode,
+        team_id:     doc.team_id,
+        pinned:      doc.pinned,
+      }
+
+      const res = await fetch(
+        exists ? supabaseUrl(`documents?id=eq.${doc.id}`) : supabaseUrl('documents'),
+        {
+          method:  exists ? 'PATCH' : 'POST',
+          headers: supabaseHeaders(),
+          body:    JSON.stringify(payload),
+        }
+      )
+      
+      if (res.ok) {
+        getDb().prepare(`UPDATE documents SET synced = 1 WHERE id = ?`).run(doc.id)
+      }
+    } catch (err) {
+      console.error('[sync push error]', err)
+      break
+    }
+  }
+
+  // 2. Push pending deletes (synced = -1)
+  const pendingDeletes = getDb().prepare(`SELECT * FROM documents WHERE synced = -1`).all() as any[]
+  for (const row of pendingDeletes) {
+    try {
+      const res = await fetch(supabaseUrl(`documents?id=eq.${row.id}&team_id=eq.${encodeURIComponent(_teamId!)}`), {
+        method:  'DELETE',
+        headers: supabaseHeaders(),
+      })
+      if (res.ok || res.status === 404) {
+        getDb().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id)
+      }
+    } catch (err) {
+      console.error('[sync delete error]', err)
+      break
+    }
+  }
+}
+
+export async function pullSupabaseChanges(): Promise<void> {
+  if (getMode() !== 'team') return
+  try {
+    const res = await fetch(
+      supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&order=created_at.desc&limit=100`),
+      { headers: supabaseHeaders() }
+    )
+    if (!res.ok) return
+    const rows = await res.json() as any[]
+    
+    getDb().transaction(() => {
+      for (const row of rows) {
+        const local = getDb().prepare(`SELECT synced FROM documents WHERE id = ?`).get(row.id) as { synced: number } | undefined
+        if (!local || local.synced === 1) {
+          const doc = rowToDocFromSupabase(row)
+          
+          getDb().prepare(`
+            INSERT INTO documents
+              (id, created_at, client_name, doc_type, description, tags, file_url, file_name, mime_type, raw_content, mode, team_id, pinned, synced)
+            VALUES
+              (@id, @created_at, @client_name, @doc_type, @description, @tags, @file_url, @file_name, @mime_type, @raw_content, @mode, @team_id, @pinned, 1)
+            ON CONFLICT(id) DO UPDATE SET
+              client_name = excluded.client_name,
+              doc_type    = excluded.doc_type,
+              description = excluded.description,
+              tags        = excluded.tags,
+              file_name   = excluded.file_name,
+              pinned      = excluded.pinned,
+              synced      = 1
+          `).run({
+            id:          doc.id,
+            created_at:  doc.created_at,
+            client_name: doc.client_name,
+            doc_type:    doc.doc_type,
+            description: doc.description,
+            tags:        JSON.stringify(doc.tags),
+            file_url:    doc.file_url,
+            file_name:   doc.file_name,
+            mime_type:   doc.mime_type,
+            raw_content: doc.raw_content,
+            mode:        doc.mode,
+            team_id:     doc.team_id,
+            pinned:      doc.pinned,
+          })
+        }
+      }
+    })()
+    invalidateCache()
+  } catch (err) {
+    console.error('[pull changes error]', err)
   }
 }

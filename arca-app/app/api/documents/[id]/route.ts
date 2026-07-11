@@ -11,11 +11,7 @@ export async function DELETE(
   }
 
   try {
-    if (getMode() === 'team') {
-      await deleteDocumentAsync(params.id)
-    } else {
-      deleteDocument(params.id)
-    }
+    deleteDocument(params.id)
     return NextResponse.json({ success: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error desconocido'
@@ -32,10 +28,8 @@ export async function PATCH(
   }
 
   try {
-    const body = await req.json() as Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name'>>
-    const updated = getMode() === 'team'
-      ? await updateDocumentAsync(params.id, body)
-      : updateDocument(params.id, body)
+    const body = await req.json() as Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name' | 'pinned'>>
+    const updated = updateDocument(params.id, body)
     return NextResponse.json(updated)
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Error desconocido'

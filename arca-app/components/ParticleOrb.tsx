@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-export type OrbState = 'idle' | 'listening' | 'processing' | 'responding' | 'success'
+export type OrbState = 'idle' | 'listening' | 'processing' | 'responding' | 'success' | 'clipboard'
 
 interface Particle {
   x: number
@@ -26,6 +26,7 @@ const CFG = {
   processing: { rgb: [240, 192,  96] as [number,number,number], orbit: 32, spd: 3.0, connAlpha: 0.25 },
   responding: { rgb: [83,   74, 183] as [number,number,number], orbit: 38, spd: 1.8, connAlpha: 0.20 },
   success:    { rgb: [29,  158, 117] as [number,number,number], orbit: 50, spd: 3.0, connAlpha: 0.30 },
+  clipboard:  { rgb: [0,   210, 255] as [number,number,number], orbit: 44, spd: 1.5, connAlpha: 0.35 },
 }
 
 // Ambient drop-shadow color per state (R, G, B)
@@ -35,6 +36,7 @@ const GLOW: Record<OrbState, [number, number, number]> = {
   processing: [240, 192,  96],
   responding: [120, 100, 220],
   success:    [29,  158, 117],
+  clipboard:  [0,   210, 255],
 }
 
 const N = 85
@@ -216,6 +218,14 @@ export function ParticleOrb({
           p.x = lerp(p.x, tx, 0.05)
           p.y = lerp(p.y, ty, 0.05)
 
+        } else if (s === 'clipboard') {
+          // clipboard — gentle pulsing spiral outward
+          p.angle += p.speed * effectiveSpd * 1.3
+          const pulse = orbit * (0.7 + 0.3 * Math.sin(now * 0.004 + p.phase))
+          const tx = CTR + Math.cos(p.angle) * pulse
+          const ty = CTR + Math.sin(p.angle) * pulse
+          p.x = lerp(p.x, tx, 0.05)
+          p.y = lerp(p.y, ty, 0.05)
         } else {
           // success — explode outward
           p.angle += p.speed * effectiveSpd
@@ -302,6 +312,27 @@ export function ParticleOrb({
         ctx.lineWidth = 1
         ctx.stroke()
       }
+
+      // ── Clipboard pulse rings ─────────────────────────────────────────────
+      if (s === 'clipboard') {
+        const t  = (now % 1800) / 1800
+        const r1 = orbit + t * 20
+        const a1 = 0.5 * (1 - t)
+        ctx.beginPath()
+        ctx.arc(CTR, CTR, r1, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(0,210,255,${a1})`
+        ctx.lineWidth   = 1.5
+        ctx.stroke()
+
+        const t2 = ((now + 900) % 1800) / 1800
+        const r2 = orbit + t2 * 20
+        const a2 = 0.5 * (1 - t2)
+        ctx.beginPath()
+        ctx.arc(CTR, CTR, r2, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(0,210,255,${a2})`
+        ctx.lineWidth   = 1
+        ctx.stroke()
+      }
     }
 
     tick()
@@ -365,6 +396,7 @@ export function ParticleOrb({
     processing: 'Procesando...',
     responding: 'Respondiendo...',
     success:    '',
+    clipboard:  '🔗 Link copiado',
   }
 
   const isActive = state === 'listening' || state === 'processing' || state === 'responding'

@@ -475,9 +475,6 @@
 </div><!-- /#app -->
 
 <script>
-  const { ipcRenderer, shell } = require('electron')
-  const https = require('https')
-
   // ── Step registry ──
   const steps = {
     step1:  document.getElementById('step1'),
@@ -618,7 +615,7 @@
     btnActivate.disabled = true
     btnActivate.textContent = 'Activando...'
 
-    var primaryUrl  = 'https://arca-panel.vercel.app/api/activate'
+    var primaryUrl  = 'https://arca-silk.vercel.app/api/activate'
     var fallbackUrl = 'http://localhost:3001/api/activate'
     var data = null
     var status = 0
@@ -663,7 +660,7 @@
 
   btnEnterTeam.addEventListener('click', function() {
     if (!activatedData) return
-    ipcRenderer.send('onboarding-complete', {
+    window.electronAPI.sendOnboardingComplete({
       mode:        'team',
       storage:     'supabase',
       supabaseUrl: activatedData.supabaseUrl,
@@ -676,14 +673,14 @@
   // STEP 3A — Local confirmed
   // ══════════════════════════════════════
   document.getElementById('btnStartLocal').addEventListener('click', function() {
-    ipcRenderer.send('onboarding-complete', { mode: 'personal', storage: 'local' })
+    window.electronAPI.sendOnboardingComplete({ mode: 'personal', storage: 'local' })
   })
 
   // ══════════════════════════════════════
   // STEP 3B — Supabase credentials
   // ══════════════════════════════════════
   document.getElementById('btnSupabaseLink').addEventListener('click', function() {
-    shell.openExternal('https://supabase.com')
+    window.electronAPI.openExternal('https://supabase.com')
   })
 
   document.getElementById('back3b').addEventListener('click', function() {
@@ -726,17 +723,8 @@
     btnVerifySupabase.disabled = true
     btnVerifySupabase.textContent = 'Verificando...'
 
-    var req = https.request({
-      hostname: hostname,
-      path: '/rest/v1/',
-      method: 'GET',
-      timeout: 8000,
-      headers: {
-        'apikey': key,
-        'Authorization': 'Bearer ' + key
-      }
-    }, function(res) {
-      if (res.statusCode >= 200 && res.statusCode < 500) {
+    window.electronAPI.verifySupabase(hostname, key).then(function(result) {
+      if (result && result.ok) {
         supabaseMsg.textContent = '✓ Conexión exitosa'
         supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(100,220,130,0.08); color:rgba(100,220,130,0.9); border:1px solid rgba(100,220,130,0.2);'
         btnVerifySupabase.style.display = 'none'
@@ -744,16 +732,13 @@
       } else {
         showSupabaseError()
       }
-      res.resume()
+    }).catch(function() {
+      showSupabaseError()
     })
-
-    req.on('error', showSupabaseError)
-    req.on('timeout', function() { req.destroy(); showSupabaseError() })
-    req.end()
   })
 
   btnEnterSupabase.addEventListener('click', function() {
-    ipcRenderer.send('onboarding-complete', {
+    window.electronAPI.sendOnboardingComplete({
       mode: 'personal',
       storage: 'supabase',
       supabaseUrl: document.getElementById('supabaseUrl').value.trim(),
