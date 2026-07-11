@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { isAllowedFile } from '@/lib/uploadValidation'
-
-const UPLOADS_DIR = join(process.cwd(), 'arca-data', 'uploads')
+import { UPLOADS_DIR } from '@/lib/paths'
 
 export async function POST(req: NextRequest) {
   const MAX_BASE64_CHARS = Math.ceil(10 * 1024 * 1024 * 4 / 3)

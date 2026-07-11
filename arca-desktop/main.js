@@ -133,7 +133,39 @@ function buildServerEnv(port) {
     ...process.env,
     PORT:     String(port),
     HOSTNAME: '127.0.0.1',
-    ARCA_DB_PATH: path.join(app.getPath('userData'), 'arca-data', 'arca.db'),
+    ARCA_DB_PATH:      path.join(app.getPath('userData'), 'arca-data', 'arca.db'),
+    ARCA_UPLOADS_PATH: path.join(app.getPath('userData'), 'arca-data', 'uploads'),
+  }
+}
+
+/** One-shot migration: uploads used to live under process.cwd()/arca-data/
+ *  which, in the packaged app, is inside resources/app — a directory
+ *  electron-updater replaces wholesale on every update, silently deleting
+ *  every file a user ever saved. Copies any such leftover uploads into the
+ *  new userData location (which survives updates) exactly once. Never
+ *  throws — must not block startup. */
+function migrateLegacyUploads() {
+  if (!app.isPackaged) return
+  const marker = path.join(app.getPath('userData'), 'uploads-migrated.json')
+  try {
+    if (fs.existsSync(marker)) return
+
+    const legacyDir = path.join(process.resourcesPath, 'app', 'arca-data', 'uploads')
+    const newDir    = path.join(app.getPath('userData'), 'arca-data', 'uploads')
+
+    if (fs.existsSync(legacyDir)) {
+      fs.mkdirSync(newDir, { recursive: true })
+      for (const name of fs.readdirSync(legacyDir)) {
+        const dest = path.join(newDir, name)
+        if (!fs.existsSync(dest)) {
+          fs.copyFileSync(path.join(legacyDir, name), dest)
+        }
+      }
+    }
+
+    fs.writeFileSync(marker, JSON.stringify({ migratedAt: new Date().toISOString() }))
+  } catch (err) {
+    console.error('[ARCA] Legacy uploads migration failed (non-fatal):', err)
   }
 }
 
@@ -676,8 +708,21 @@ function registerIPC() {
   ipcMain.handle('open-external', (_event, url) => {
     try {
       const parsed = new URL(String(url))
-      if (!['http:', 'https:'].includes(parsed.protocol)) return
-      shell.openExternal(parsed.href)
+      if (['http:', 'https:'].includes(parsed.protocol)) {
+        shell.openExternal(parsed.href)
+        return
+      }
+      if (parsed.protocol === 'file:') {
+        // Uploaded files are saved as file:// URLs (see ARCA_UPLOADS_PATH in
+        // buildServerEnv) — only allow opening files that actually live
+        // inside that folder, never an arbitrary path on disk.
+        const { fileURLToPath } = require('url')
+        const uploadsDir = path.join(app.getPath('userData'), 'arca-data', 'uploads')
+        const target = path.normalize(fileURLToPath(parsed))
+        if (target === uploadsDir || target.startsWith(uploadsDir + path.sep)) {
+          shell.openPath(target)
+        }
+      }
     } catch { /* invalid URL — ignore */ }
   })
 
@@ -847,6 +892,7 @@ app.whenReady().then(async () => {
   }
 
   registerIPC()
+  migrateLegacyUploads()
 
   // Start arca-app's own server before loading any window into it, retrying
   // on the next port if one is already taken by another local project.

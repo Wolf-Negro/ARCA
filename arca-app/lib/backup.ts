@@ -1,10 +1,8 @@
 import Database from 'better-sqlite3'
 import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, unlinkSync } from 'fs'
-import { dirname, resolve, join } from 'path'
+import { dirname, join } from 'path'
+import { DB_PATH } from './paths'
 
-// Same path resolution logic as lib/db.ts, so backups always target the
-// database file actually in use (respects ARCA_DB_PATH).
-const DB_PATH      = resolve(process.env.ARCA_DB_PATH ?? './arca-data/arca.db')
 const BACKUPS_DIR  = join(dirname(DB_PATH), 'backups')
 const MAX_BACKUPS  = 14
 

@@ -1,9 +1,10 @@
 import Database from 'better-sqlite3'
 import { mkdirSync, existsSync } from 'fs'
-import { dirname, resolve } from 'path'
+import { dirname, basename, join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMetadata } from './metadata'
 import { runBackup } from './backup'
+import { DB_PATH, UPLOADS_DIR } from './paths'
 
 // ─── Team mode config (set by /api/init-team) ─────────────────────────────────
 
@@ -72,8 +73,6 @@ export interface Document {
 
 // ─── DB singleton ─────────────────────────────────────────────────────────────
 
-const DB_PATH = resolve(process.env.ARCA_DB_PATH ?? './arca-data/arca.db')
-
 let db: Database.Database | null = null
 
 // Prepared statements (created once in getDb)
@@ -121,6 +120,25 @@ function getDb(): Database.Database {
   try {
     db.exec(`ALTER TABLE documents ADD COLUMN synced INTEGER DEFAULT 1`)
   } catch (err) {}
+
+  // One-time repair for uploads whose file:// URL points at a path that no
+  // longer exists (e.g. arca-desktop moved the uploads dir to survive
+  // auto-updates) — if a file with the same name exists in the current
+  // UPLOADS_DIR, repoint the row at it instead of leaving a dead link.
+  try {
+    const rows = db.prepare(`SELECT id, file_url FROM documents WHERE file_url LIKE 'file://%'`).all() as { id: string, file_url: string }[]
+    const fixStmt = db.prepare(`UPDATE documents SET file_url = ? WHERE id = ?`)
+    for (const row of rows) {
+      const currentPath = row.file_url.slice('file://'.length)
+      if (existsSync(currentPath)) continue
+      const candidate = join(UPLOADS_DIR, basename(currentPath))
+      if (existsSync(candidate)) {
+        fixStmt.run(`file://${candidate}`, row.id)
+      }
+    }
+  } catch (err) {
+    console.error('[db] file_url migration failed', err)
+  }
 
   // Best-effort backup of the DB file, once per process startup. Never
   // allowed to block or crash initialization.
