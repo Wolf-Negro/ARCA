@@ -373,10 +373,14 @@ export function ChatPanel({
     onProcessingChange?.(isProcessing)
   }, [isProcessing]) // eslint-disable-line
 
-  // Auto-scroll
+  // Auto-scroll. Also depends on `isOpen`: the messages list below is
+  // unmounted while the panel is closed (see the `{isOpen && (...)}` guard
+  // further down), so every reopen mounts a fresh scroll container starting
+  // at the top — without `isOpen` here, this effect only re-fires when
+  // `messages` itself changes, which it doesn't just from reopening.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (isOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isOpen])
 
   // Focus on open (60ms delay as specified)
   useEffect(() => {
