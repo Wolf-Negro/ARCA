@@ -116,15 +116,29 @@ async function rest(path, { method = 'GET', headers, body } = {}) {
 }
 
 function newDoc(teamId, suffix) {
-  // doc_type, description, file_name, team_id are the NOT NULL columns with
-  // no default in arca-app/supabase/schema.sql — id has no default either
-  // (it's a plain TEXT primary key, not a generated uuid), so we supply one.
+  // Every NOT NULL column with no default must be present here, or
+  // PostgREST rejects the insert before RLS even gets a chance to run —
+  // which would masquerade as a false "isolation" pass/fail. Two sources:
+  //
+  // 1. arca-app/supabase/schema.sql (the tracked schema): id (plain TEXT
+  //    primary key, no generated default — we must supply one), doc_type,
+  //    description, file_name, team_id.
+  // 2. `uploaded_by` — NOT NULL on the real live table, but it does not
+  //    exist anywhere in schema.sql or any tracked migration. This is
+  //    schema drift (see supabase/migrations/fix_uploaded_by_nullable.sql
+  //    for the real fix, and the commit message for the full story) — the
+  //    app itself never sends this column either, so until that migration
+  //    is applied, every real save in team mode fails with the same error
+  //    this script originally hit. Supplying a placeholder here keeps the
+  //    RLS test itself unblocked regardless of whether that migration has
+  //    been run yet.
   return {
     id:          randomUUID(),
     doc_type:    'Documento de prueba RLS',
     description: `Documento de prueba de aislamiento (${suffix})`,
     file_name:   `rls-test-${suffix}.txt`,
     team_id:     teamId,
+    uploaded_by: 'test-rls-isolation-script',
   }
 }
 
