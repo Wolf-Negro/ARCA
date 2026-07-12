@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "prebuild:win": "node scripts/stage-node-binary.js",
     "build": "electron-builder",
     "build:win": "electron-builder --win"
   },
@@ -71,7 +72,7 @@
       "icon": "../arca-app/public/icon-512.png",
       "extraResources": [
         {
-          "from": "C:/Program Files/nodejs/node.exe",
+          "from": ".staging/node.exe",
           "to": "node/node.exe"
         }
       ]

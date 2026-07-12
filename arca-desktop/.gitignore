@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 .native-rebuild-scratch/
+.staging/
 .DS_Store
 Thumbs.db
 *.log
