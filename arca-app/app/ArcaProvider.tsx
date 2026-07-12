@@ -29,7 +29,7 @@ declare global {
       moveWindow?:           (x: number, y: number) => void
       snapToEdge?:           () => void
       hideWindow?:           () => void
-      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; teamId?: string; adminSecret?: string } | null>
+      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; anonKey?: string; teamId?: string; adminSecret?: string } | null>
     }
   }
 }
@@ -57,6 +57,7 @@ export function ArcaProvider({ children }: { children: React.ReactNode }) {
     storage?: 'local' | 'supabase'
     supabaseUrl?: string
     supabaseKey?: string
+    anonKey?: string
     teamId?: string
   } | null>(null)
 
@@ -72,7 +73,7 @@ export function ArcaProvider({ children }: { children: React.ReactNode }) {
             'Content-Type': 'application/json',
             ...(cfg.adminSecret ? { 'x-arca-admin-secret': cfg.adminSecret } : {}),
           },
-          body: JSON.stringify({ supabaseUrl: cfg.supabaseUrl, supabaseKey: cfg.supabaseKey, teamId: cfg.teamId }),
+          body: JSON.stringify({ supabaseUrl: cfg.supabaseUrl, supabaseKey: cfg.supabaseKey, anonKey: cfg.anonKey, teamId: cfg.teamId }),
         }).then(async res => {
           if (!res.ok) {
             console.error('[ARCA] init-team falló:', res.status, await res.text().catch(() => ''))

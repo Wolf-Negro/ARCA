@@ -9,7 +9,8 @@ import { DB_PATH, UPLOADS_DIR } from './paths'
 // ─── Team mode config (set by /api/init-team) ─────────────────────────────────
 
 let _supabaseUrl: string | null = null
-let _supabaseKey: string | null = null
+let _supabaseKey: string | null = null // per-agency JWT (falls back to the anon key for old configs)
+let _anonKey:     string | null = null
 let _teamId:      string | null = null
 
 // Team config only ever lived in RAM before — a Next.js server restart
@@ -24,10 +25,11 @@ function loadPersistedTeamConfig(): void {
   _triedLoadTeamConfig = true
   try {
     const raw = readFileSync(TEAM_CONFIG_PATH, 'utf-8')
-    const cfg = JSON.parse(raw) as { supabaseUrl?: string, supabaseKey?: string, teamId?: string }
+    const cfg = JSON.parse(raw) as { supabaseUrl?: string, supabaseKey?: string, anonKey?: string, teamId?: string }
     if (cfg.supabaseUrl && cfg.supabaseKey && cfg.teamId) {
       _supabaseUrl = cfg.supabaseUrl
       _supabaseKey = cfg.supabaseKey
+      _anonKey     = cfg.anonKey ?? null
       _teamId      = cfg.teamId
     }
   } catch {
@@ -35,15 +37,18 @@ function loadPersistedTeamConfig(): void {
   }
 }
 
-export function setTeamConfig(supabaseUrl: string, supabaseKey: string, teamId: string): void {
+export function setTeamConfig(supabaseUrl: string, supabaseKey: string, teamId: string, anonKey?: string): void {
   _supabaseUrl = supabaseUrl
   _supabaseKey = supabaseKey
+  _anonKey     = anonKey ?? null
   _teamId      = teamId
   _triedLoadTeamConfig = true // this call is now the source of truth, no need to load from disk
   try {
-    // Same exposure level as arca-config.json (plaintext on disk) — mitigated
-    // in a later phase by moving to a per-agency JWT instead of a shared key.
-    writeFileSync(TEAM_CONFIG_PATH, JSON.stringify({ supabaseUrl, supabaseKey, teamId }), 'utf-8')
+    // Same exposure level as arca-config.json (plaintext on disk) — accepted
+    // for the pilot; supabaseKey is now a scoped per-agency JWT rather than
+    // the shared anon key, so a leak here no longer grants access to every
+    // other agency's data.
+    writeFileSync(TEAM_CONFIG_PATH, JSON.stringify({ supabaseUrl, supabaseKey, anonKey, teamId }), 'utf-8')
   } catch {
     // Best-effort — team mode still works for the current process even if
     // this write fails, it just won't survive a server restart.
@@ -57,7 +62,12 @@ export function getMode(): 'personal' | 'team' {
 
 function supabaseHeaders() {
   return {
-    'apikey':        _supabaseKey!,
+    // apikey must be the project's anon/publishable key for PostgREST to
+    // accept the request at all; Authorization carries the per-agency JWT
+    // that RLS policies actually check (auth.jwt() ->> 'team_id'). Configs
+    // saved before the JWT migration have no anonKey — fall back to using
+    // supabaseKey for both, same as the old shared-anon-key behavior.
+    'apikey':        _anonKey ?? _supabaseKey!,
     'Authorization': `Bearer ${_supabaseKey!}`,
     'Content-Type':  'application/json',
     'Prefer':        'return=representation',

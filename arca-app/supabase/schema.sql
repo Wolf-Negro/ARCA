@@ -23,15 +23,15 @@ CREATE INDEX IF NOT EXISTS idx_created ON documents(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_description ON documents USING gin(to_tsvector('spanish', description));
 
 -- Row Level Security: each team_id only sees its own rows.
--- Note: RLS with anon key requires enabling it here AND creating a policy.
--- For simplicity with the anon key (no JWT claims), we rely on app-level
--- team_id filtering in all queries. RLS below adds an extra safety layer
--- if you upgrade to a service-role or JWT-based flow later.
+-- arca-panel signs a JWT per agency (role: authenticated, team_id: <agency>)
+-- in /api/activate — RLS checks that claim directly, so one agency's key can
+-- never read or write another agency's rows, even via a raw curl to
+-- PostgREST with an arbitrary team_id filter.
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 
--- Allow anon key full access (app enforces team_id filtering in queries)
-CREATE POLICY "anon full access" ON documents
-  FOR ALL
-  TO anon
-  USING (true)
-  WITH CHECK (true);
+DROP POLICY IF EXISTS "anon full access" ON documents;
+
+CREATE POLICY "team isolation" ON documents
+  FOR ALL TO authenticated
+  USING (team_id = (auth.jwt() ->> 'team_id'))
+  WITH CHECK (team_id = (auth.jwt() ->> 'team_id'));

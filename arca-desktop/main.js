@@ -769,6 +769,10 @@ function registerIPC() {
         resolve({ ok: false })
         return
       }
+      if (!/^[a-z0-9-]+\.supabase\.co$/i.test(hostname)) {
+        resolve({ ok: false })
+        return
+      }
       const req = https.request({
         hostname,
         path:    '/rest/v1/',

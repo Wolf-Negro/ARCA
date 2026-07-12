@@ -1,3 +1,22 @@
+# ARCA Panel
+
+Admin panel for issuing and validating agency/team activation codes consumed
+by `arca-desktop`'s onboarding flow. See the root `CLAUDE.md` for the full
+picture of how this fits with `arca-app` and `arca-desktop`.
+
+## Known limitation: JWT revocation
+
+`/api/activate` signs each agency a JWT (`{ role: 'authenticated', team_id }`)
+that Supabase's RLS policies check directly (`auth.jwt() ->> 'team_id'`).
+**Deactivating an agency here does not revoke JWTs it already has** — those
+tokens remain valid for their full `expiresIn` (180 days) regardless of the
+agency's `active` flag in this panel. This is an accepted limitation for the
+pilot; a production revocation flow would need either short-lived tokens with
+silent refresh, or a Postgres-side check against a "revoked" table joined
+into the RLS policy.
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
     }
 
-    const { supabaseUrl, supabaseKey, teamId } = await req.json()
+    const { supabaseUrl, supabaseKey, teamId, anonKey } = await req.json()
 
     if (!supabaseUrl || !supabaseKey || !teamId) {
       return NextResponse.json({ error: 'supabaseUrl, supabaseKey y teamId son requeridos' }, { status: 400 })
@@ -25,10 +25,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: message }, { status: 400 })
     }
 
-    // Test the connection with team_id filter
+    // Test the connection with team_id filter. apikey must be the project's
+    // anon key (falls back to supabaseKey for pre-JWT configs); Authorization
+    // carries the per-agency JWT that RLS actually checks.
     const testRes = await fetch(`${supabaseUrl}/rest/v1/documents?team_id=eq.${encodeURIComponent(teamId)}&limit=1`, {
       headers: {
-        'apikey':        supabaseKey,
+        'apikey':        anonKey || supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
       },
     })
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Configure the db module
-    setTeamConfig(supabaseUrl, supabaseKey, teamId)
+    setTeamConfig(supabaseUrl, supabaseKey, teamId, anonKey)
 
     return NextResponse.json({ success: true })
   } catch (err) {
