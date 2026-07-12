@@ -39,7 +39,7 @@ Todas son opcionales; sin ninguna, la app funciona 100% local. Copia `.env.local
 
 ## Modo equipo (Supabase, opcional)
 
-Si una agencia activa el modo equipo (vía código de activación en `arca-panel` durante el onboarding de arca-desktop), `lib/db.ts` sincroniza los documentos contra el proyecto Supabase de esa agencia. El schema esperado es la tabla `documents` con las columnas usadas en `lib/db.ts` (client_name, doc_type, description, tags, file_url, file_name, mime_type, pinned, team_id, etc). Este modo es completamente opcional — no es necesario para uso individual.
+Si una agencia activa el modo equipo (vía código de activación en `arca-panel` durante el onboarding de arca-desktop), `lib/db.ts` sincroniza los documentos contra el proyecto Supabase de esa agencia. El schema completo vive en `supabase/schema.sql` (para proyectos nuevos) y `supabase/migrations/` (para proyectos ya existentes) — incluye `client_name`, `doc_type`, `description`, `tags`, `file_url`, `file_name`, `mime_type`, `pinned`, `team_id`, `uploaded_by` (columna legacy sin uso real, nullable con default `'desktop'`), `deleted`/`updated_at` (tombstones de sync), entre otras. Este modo es completamente opcional — no es necesario para uso individual.
 
 ## Desarrollo local
 

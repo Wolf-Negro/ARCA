@@ -1,0 +1,22 @@
+-- Found via a static audit of schema.sql/migrations against what lib/db.ts
+-- actually reads and writes (prompted by the uploaded_by drift above): the
+-- `pinned` column that arca-app's team-mode sync depends on was never added
+-- to the tracked Supabase schema at all — no migration here ever created it,
+-- unlike `team_id` (add_team_id.sql) or `deleted`/`updated_at`
+-- (add_deleted_updated.sql).
+--
+-- Code that assumes this column exists on the live table:
+--   - lib/db.ts rowToDocFromSupabase()      reads  row.pinned  from PostgREST responses
+--   - lib/db.ts triggerBackgroundSync()     writes doc.pinned  in its POST/PATCH push payload
+--
+-- Without this column, that push fails with a PostgREST schema-cache error
+-- ("Could not find the 'pinned' column of 'documents' in the schema
+-- cache") the first time a pinned/unpinned document tries to sync in team
+-- mode — the exact same category of bug as uploaded_by, just not yet hit in
+-- testing because scripts/test-rls-isolation.mjs doesn't exercise pin/sync.
+--
+-- Not yet confirmed against the real production table (unlike
+-- uploaded_by) — run this once you've verified whether `pinned` is already
+-- there or not.
+
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS pinned INTEGER DEFAULT 0;

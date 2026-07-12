@@ -3,6 +3,11 @@
 CREATE TABLE IF NOT EXISTS documents (
   id          TEXT PRIMARY KEY,
   created_at  TIMESTAMPTZ DEFAULT NOW(),
+  -- Legacy column from a pre-team_id version of this schema, kept nullable
+  -- with a default rather than removed — arca-app itself never reads or
+  -- writes it, it has no concept of an individual uploader (single-user
+  -- install per machine, team_id is the only identity it tracks).
+  uploaded_by TEXT DEFAULT 'desktop',
   client_name TEXT,
   doc_type    TEXT NOT NULL,
   description TEXT NOT NULL,
@@ -13,6 +18,12 @@ CREATE TABLE IF NOT EXISTS documents (
   raw_content TEXT,
   mode        TEXT DEFAULT 'team',
   team_id     TEXT NOT NULL,
+  -- INTEGER (0/1), not BOOLEAN, to mirror the local SQLite column exactly —
+  -- lib/db.ts's rowToDocFromSupabase does `row.pinned ?? 0`, which only
+  -- falls back to 0 when the value is null/undefined; a Postgres `false`
+  -- would pass through as-is and silently mix booleans with numbers in the
+  -- same in-memory Document[] array.
+  pinned      INTEGER     DEFAULT 0,
   deleted     BOOLEAN     DEFAULT false,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
