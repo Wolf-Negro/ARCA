@@ -7,9 +7,7 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "build": "electron-builder",
-    "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "build:linux": "electron-builder --linux"
+    "build:win": "electron-builder --win"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -77,26 +75,6 @@
           "to": "node/node.exe"
         }
       ]
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "../arca-app/public/icon-512.png",
-      "category": "public.app-category.productivity"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "../arca-app/public/icon-512.png",
-      "category": "Utility"
     },
     "nsis": {
       "oneClick": true,

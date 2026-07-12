@@ -20,7 +20,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   snapToEdge:       ()      => ipcRenderer.send('snap-to-edge',
                                  { x: window.screenX, y: window.screenY }),
   hideWindow:       ()      => ipcRenderer.send('hide-window'),
-  openAuth:         ()      => ipcRenderer.send('open-auth'),
   getConfig:        ()      => ipcRenderer.invoke('get-config'),
 })
 

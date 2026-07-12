@@ -52,7 +52,7 @@ El icono ARCA aparece en la bandeja del sistema.
 | Atajo | Acción |
 |---|---|
 | `Ctrl+Space` | Toggle mostrar / ocultar ventana |
-| `Ctrl+Shift+V` | Activar micrófono directamente |
+| `Ctrl+Shift+V` | Abrir el panel directamente |
 
 > **Nota sobre Ctrl+Space en Windows:** Este atajo puede estar tomado por el
 > selector de idioma de entrada de Windows. Si no funciona, ve a
@@ -65,7 +65,7 @@ El icono ARCA aparece en la bandeja del sistema.
 - **Clic izquierdo** → toggle mostrar/ocultar
 - **Clic derecho** → menú contextual:
   - Mostrar / Ocultar ventana
-  - Activar micrófono
+  - Abrir panel
   - Salir
 
 Cerrar la ventana (×) la **oculta**, no la termina.  
@@ -90,24 +90,19 @@ npm run build:win
 # Salida: dist/ARCA Setup x.x.x.exe
 ```
 
-### macOS (genera .dmg)
+### macOS / Linux — no soportado todavía
 
-```bash
-npm run build:mac
-# Salida: dist/ARCA-x.x.x.dmg
-```
-
-### Todas las plataformas
-
-```bash
-npm run build
-```
+Solo Windows por ahora: el build empaqueta un Node.js real (`resources/node/node.exe`)
+para correr el server bundleado de arca-app sin depender del ABI de Node que trae
+Electron internamente. Para soportar mac/linux hay que empaquetar el binario de
+Node correspondiente a cada plataforma y parametrizar `nodeBinary` en `main.js`
+(hoy está fijo a `node.exe`).
 
 > **Importante:** Para hacer build de distribución, primero asegúrate de tener
 > `arca-app/public/icon-192.png` y `arca-app/public/icon-512.png` (ya generados).
 > En Windows necesitas `electron-builder` 24+ y Visual Studio Build Tools.
 
-## Integración con la PWA: activación de voz
+## Integración con arca-app
 
 El Electron inyecta una API en `window.electronAPI` disponible para el
 Next.js renderer:
@@ -127,14 +122,12 @@ declare global {
 // Escuchar el shortcut Ctrl+Shift+V
 useEffect(() => {
   window.electronAPI?.onActivateVoice(() => {
-    startListening()  // activa Web Speech API
+    // Hoy solo abre el panel — ARCA no tiene feature de voz/micrófono, y
+    // main.js deniega explícitamente cualquier permiso de media/mic.
   })
   return () => window.electronAPI?.offActivateVoice()
 }, [])
 ```
-
-Para conectar el shortcut al hook de voz existente, agrega este `useEffect`
-en `ArcaProvider.tsx` (el componente ya tiene acceso a `startListening`).
 
 ## Estructura de archivos
 

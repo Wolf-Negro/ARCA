@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, globalShortcut,
-  screen, ipcMain, shell, session, clipboard, systemPreferences,
+  screen, ipcMain, shell, session, clipboard,
 } = require('electron')
 const path   = require('path')
 const fs     = require('fs')
@@ -12,11 +12,6 @@ const crypto = require('crypto')
 const { spawn, exec } = require('child_process')
 const { autoUpdater } = require('electron-updater')
 const { createTray } = require('./tray')
-
-// Allow audio autoplay without a user gesture (needed for ElevenLabs TTS via new Audio())
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
-// Ensure Web Speech API feature is explicitly enabled
-app.commandLine.appendSwitch('enable-features', 'WebSpeechAPI,AudioCaptureAllowed')
 
 // ── Window size constants ─────────────────────────────────────────────────────
 const ORB_SIZE      = 150           // orb-only mode
@@ -36,7 +31,6 @@ const ADMIN_SECRET = crypto.randomBytes(32).toString('hex')
 
 /** @type {BrowserWindow|null} */ let win     = null
 /** @type {import('electron').Tray|null} */ let tray = null
-/** @type {BrowserWindow|null} */ let authWin = null
 /** @type {BrowserWindow|null} */ let onboardingWin = null
 /** @type {import('child_process').ChildProcess|null} */ let nextServerProcess = null
 let retryCount  = 0
@@ -351,8 +345,6 @@ function createWindow(savedBounds = null) {
     },
   })
 
-  // (mic permissions are granted globally in setupPermissions() below)
-
   // ── Show only after first paint; re-validate bounds in case display changed ─
   // Safety fallback: force-show after 15 s if ready-to-show never fires
   // (e.g. Next.js very slow to compile or loading fails entirely).
@@ -380,7 +372,12 @@ function createWindow(savedBounds = null) {
 
   // ── Persistent load handlers ──────────────────────────────────────────────
   win.webContents.on('did-fail-load', (_e, code, _desc, url) => {
-    if (url === NEXT_URL && code !== 0) scheduleRetry()
+    // Compare origins, not exact strings — NEXT_URL has no trailing slash but
+    // a failed navigation's url can come back as e.g. `${NEXT_URL}/`, which
+    // would never match a strict `===` and silently skip the retry.
+    try {
+      if (new URL(url).origin === new URL(NEXT_URL).origin && code !== 0) scheduleRetry()
+    } catch { /* not a parseable URL — ignore */ }
   })
 
   win.webContents.on('did-finish-load', () => {
@@ -663,55 +660,6 @@ function registerIPC() {
     }
   })
 
-  // ── Google OAuth popup ───────────────────────────────────────────────────
-  ipcMain.on('open-auth', () => {
-    // Prevent multiple auth windows if user clicks the button twice
-    if (authWin && !authWin.isDestroyed()) {
-      authWin.focus()
-      return
-    }
-
-    authWin = new BrowserWindow({
-      width:  520,
-      height: 680,
-      center: true,
-      show:   false,
-      autoHideMenuBar: true,
-      alwaysOnTop: true,
-      webPreferences: {
-        contextIsolation:   true,
-        nodeIntegration:    false,
-        sandbox:            true,
-        devTools:           false,
-        enableRemoteModule: false,
-      },
-    })
-
-    authWin.loadURL(`${NEXT_URL}/api/auth/signin/google`)
-    authWin.once('ready-to-show', () => authWin?.show())
-
-    // Auto-close if auth takes more than 5 minutes
-    const timeout = setTimeout(() => {
-      if (authWin && !authWin.isDestroyed()) authWin.destroy()
-    }, 5 * 60 * 1000)
-
-    authWin.once('closed', () => {
-      clearTimeout(timeout)
-      authWin = null
-    })
-
-    // When OAuth finishes, Google redirects → callback → root of the app
-    const onNav = (_e, url) => {
-      if (url === NEXT_URL || url === NEXT_URL + '/') {
-        clearTimeout(timeout)
-        authWin?.destroy()
-        win?.webContents.reload()
-      }
-    }
-    authWin.webContents.on('will-navigate', onNav)
-    authWin.webContents.on('did-navigate',  onNav)
-  })
-
   ipcMain.handle('open-external', (_event, url) => {
     try {
       const parsed = new URL(String(url))
@@ -797,6 +745,7 @@ let lastClipboardUrl = ''
 function startClipboardPoll() {
   setInterval(() => {
     try {
+      if (!win || win.isDestroyed() || !win.isVisible()) return
       const text = clipboard.readText().trim()
       if (!text) return
       if (/^https?:\/\/[^\s]+$/i.test(text)) {
@@ -813,52 +762,12 @@ function startClipboardPoll() {
   }, 1500)
 }
 
-// ── Microphone / media permissions ───────────────────────────────────────────
-
-// Permission names Electron uses for media/microphone access:
-//   'media'       — getUserMedia (audio+video)
-//   'speech'      — Web Speech API SpeechRecognition
-//   'audioCapture', 'microphone' — legacy / alias names
-const ALLOWED_PERMISSIONS = new Set([
-  'media', 'speech', 'microphone', 'audioCapture', 'speechRecognition',
-])
-
-// Cache of already-approved permission types.
-// SpeechRecognition calls getUserMedia on every restart; without this cache
-// the request handler fires hundreds of times and spams the console.
-const grantedPermissions = new Set()
-
-function isPermissionAllowed(permission, details) {
-  return ALLOWED_PERMISSIONS.has(permission) ||
-    (permission === 'media' && (
-      !details?.mediaTypes || details.mediaTypes.includes('audio')
-    ))
-}
-
+// ── Permissions ────────────────────────────────────────────────────────────
+// ARCA has no voice/mic feature — deny every permission request outright
+// rather than maintaining an allowlist for capabilities the app never uses.
 function setupPermissions() {
-  // Approve requests — log only once per permission type, then cache
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) => {
-    if (grantedPermissions.has(permission)) {
-      cb(true)   // already granted — skip log to avoid infinite spam
-      return
-    }
-    const allowed = isPermissionAllowed(permission, details)
-    if (allowed) {
-      console.log(`[ARCA] Permission granted (first time): ${permission}`)
-      grantedPermissions.add(permission)
-    } else {
-      console.warn(`[ARCA] Permission denied: ${permission}`)
-    }
-    cb(allowed)
-  })
-
-  // Pre-approve checks so the browser short-circuits before reaching the
-  // request handler — this is what should prevent repeat request callbacks,
-  // but we keep the cache above as a belt-and-suspenders guard.
-  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => {
-    if (grantedPermissions.has(permission)) return true
-    return isPermissionAllowed(permission, details)
-  })
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false))
+  session.defaultSession.setPermissionCheckHandler(() => false)
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -901,12 +810,6 @@ app.whenReady().then(async () => {
   // Permissions must be registered before the window navigates
   setupPermissions()
 
-  // On macOS, trigger the OS microphone-access dialog if not yet authorised
-  if (process.platform === 'darwin') {
-    const status = await systemPreferences.askForMediaAccess('microphone')
-    console.log(`[ARCA] macOS microphone access: ${status}`)
-  }
-
   registerIPC()
   migrateLegacyUploads()
 
@@ -943,7 +846,11 @@ app.whenReady().then(async () => {
 app.on('will-quit',         () => globalShortcut.unregisterAll())
 app.on('before-quit',       () => { isQuitting = true; stopNextServer() })
 app.on('activate',          () => {
-  if (BrowserWindow.getAllWindows().length === 0) win = createWindow()
-  else { win?.show(); win?.focus() }
+  if (BrowserWindow.getAllWindows().length === 0) {
+    if (loadConfig()) win = createWindow()
+    else onboardingWin = createOnboardingWindow()
+  } else {
+    win?.show(); win?.focus()
+  }
 })
 app.on('window-all-closed', (e) => e.preventDefault())

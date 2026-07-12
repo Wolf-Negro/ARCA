@@ -615,13 +615,15 @@
     btnActivate.disabled = true
     btnActivate.textContent = 'Activando...'
 
-    var primaryUrl  = 'https://arca-silk.vercel.app/api/activate'
-    var fallbackUrl = 'http://localhost:3001/api/activate'
+    // For local development against a panel running on :3001, edit this
+    // constant directly — no runtime fallback, so production never has a
+    // reason to try an unreachable localhost URL first.
+    var activateUrl = 'https://arca-silk.vercel.app/api/activate'
     var data = null
     var status = 0
 
     try {
-      var res = await fetch(primaryUrl, {
+      var res = await fetch(activateUrl, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ code: code }),
@@ -629,18 +631,8 @@
       status = res.status
       if (res.ok) data = await res.json()
     } catch (err) {
-      try {
-        var res2 = await fetch(fallbackUrl, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ code: code }),
-        })
-        status = res2.status
-        if (res2.ok) data = await res2.json()
-      } catch (err2) {
-        showActivationError('No se pudo conectar. Verifica tu internet.')
-        return
-      }
+      showActivationError('No se pudo conectar. Verifica tu internet.')
+      return
     }
 
     if (data) {

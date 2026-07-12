@@ -64,7 +64,7 @@ function createTray(win) {
         },
       },
       {
-        label: 'Activar micrófono',
+        label: 'Abrir panel',
         accelerator: 'CommandOrControl+Shift+V',
         click: () => {
           if (!win.isVisible()) {
