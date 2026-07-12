@@ -12,12 +12,27 @@ CREATE TABLE IF NOT EXISTS documents (
   mime_type   TEXT,
   raw_content TEXT,
   mode        TEXT DEFAULT 'team',
-  team_id     TEXT NOT NULL
+  team_id     TEXT NOT NULL,
+  deleted     BOOLEAN     DEFAULT false,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_team    ON documents(team_id);
 CREATE INDEX IF NOT EXISTS idx_client  ON documents(client_name);
 CREATE INDEX IF NOT EXISTS idx_created ON documents(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_updated ON documents(updated_at DESC);
+
+-- Soft-delete tombstones: deletes propagate as `deleted = true` rows instead
+-- of a real DELETE, so other team members' incremental pull (which only asks
+-- for rows changed since its last watermark) finds out about them. A hard
+-- DELETE would just vanish from that query, so on other devices it would
+-- never be told to remove its local copy.
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_documents_updated ON documents;
+CREATE TRIGGER trg_documents_updated BEFORE UPDATE ON documents
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Optional: full-text search index
 CREATE INDEX IF NOT EXISTS idx_description ON documents USING gin(to_tsvector('spanish', description));

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs'
-import { dirname, basename, join } from 'path'
+import { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs'
+import { dirname, basename, join, resolve, sep } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMetadata } from './metadata'
 import { runBackup } from './backup'
@@ -154,6 +154,13 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_client  ON documents(client_name);
     CREATE INDEX IF NOT EXISTS idx_created ON documents(created_at DESC);
+
+    -- Small key/value store for sync bookkeeping (e.g. the incremental-pull
+    -- watermark) — doesn't warrant its own module.
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
   `)
 
   // Safe migrations for existing databases
@@ -219,6 +226,34 @@ function getDb(): Database.Database {
   stmtSelectAll = db.prepare(`SELECT * FROM documents WHERE synced != -1 ORDER BY pinned DESC, created_at DESC`)
 
   return db
+}
+
+// ─── Sync bookkeeping (meta table) ────────────────────────────────────────────
+
+function getMeta(key: string): string | null {
+  const row = getDb().prepare(`SELECT value FROM meta WHERE key = ?`).get(key) as { value: string } | undefined
+  return row?.value ?? null
+}
+
+function setMeta(key: string, value: string): void {
+  getDb().prepare(`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value)
+}
+
+// ─── Local file deletion ──────────────────────────────────────────────────────
+
+/** Best-effort removal of an uploaded file when its document is deleted.
+ *  Only ever touches paths that resolve inside UPLOADS_DIR — never anything
+ *  else on disk, even if file_url were somehow malformed. */
+function deleteLocalFileIfOwned(fileUrl: string | null): void {
+  if (!fileUrl || !fileUrl.startsWith('file://')) return
+  try {
+    const target = resolve(fileUrl.slice('file://'.length))
+    const uploadsRoot = resolve(UPLOADS_DIR)
+    if (target !== uploadsRoot && !target.startsWith(uploadsRoot + sep)) return
+    if (existsSync(target)) unlinkSync(target)
+  } catch {
+    // Best-effort — a stale/already-gone file should never block a delete.
+  }
 }
 
 // ─── In-memory cache ──────────────────────────────────────────────────────────
@@ -411,8 +446,10 @@ export function deleteDocument(id: string): void {
     invalidateCache()
     triggerBackgroundSync().catch(() => {})
   } else {
+    const row = stmtSelectById.get(id) as { file_url: string | null } | undefined
     stmtDeleteById.run(id)
     invalidateCache()
+    if (row) deleteLocalFileIfOwned(row.file_url)
   }
 }
 
@@ -484,7 +521,9 @@ export async function saveDocumentAsync(
     doc_type:    metadata.doc_type,
     description: metadata.description,
     tags:        metadata.tags,
-    file_url:    fileUrl    ?? null,
+    // A file:// URL only means anything on the machine that saved it — share
+    // the metadata with the rest of the team, but not a dead local path.
+    file_url:    fileUrl?.startsWith('file://') ? null : (fileUrl ?? null),
     file_name:   metadata.file_name,
     mime_type:   mimeType   ?? null,
     raw_content: rawContent ?? null,
@@ -506,7 +545,7 @@ export async function findDocumentByUrlAsync(url: string): Promise<Document | nu
   const candidates = [url, normalized].filter((v, i, a) => a.indexOf(v) === i)
   for (const candidate of candidates) {
     const res = await fetch(
-      supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&file_url=eq.${encodeURIComponent(candidate)}&limit=1`),
+      supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&file_url=eq.${encodeURIComponent(candidate)}&limit=1`),
       { headers: supabaseHeaders() }
     )
     if (res.ok) {
@@ -522,7 +561,7 @@ export async function searchDocumentsAsync(
   clientFilter?:  string,
   docTypeFilter?: string
 ): Promise<Document[]> {
-  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&order=created_at.desc`
+  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&order=created_at.desc`
   if (clientFilter)  path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (query) {
@@ -536,7 +575,7 @@ export async function searchDocumentsAsync(
 }
 
 export async function listRecentDocumentsAsync(limit: number, clientFilter?: string): Promise<Document[]> {
-  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&order=created_at.desc&limit=${limit}`
+  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&order=created_at.desc&limit=${limit}`
   if (clientFilter) path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   const res = await fetch(supabaseUrl(path), { headers: supabaseHeaders() })
   if (!res.ok) return []
@@ -550,7 +589,7 @@ export async function listDocumentsByDateAsync(date: 'today' | 'yesterday', clie
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const from = date === 'today' ? todayStart               : new Date(todayStart.getTime() - dayMs)
   const to   = date === 'today' ? new Date(todayStart.getTime() + dayMs) : todayStart
-  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&created_at=gte.${from.toISOString()}&created_at=lt.${to.toISOString()}&order=created_at.desc`
+  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&created_at=gte.${from.toISOString()}&created_at=lt.${to.toISOString()}&order=created_at.desc`
   if (clientFilter) path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   const res = await fetch(supabaseUrl(path), { headers: supabaseHeaders() })
   if (!res.ok) return []
@@ -559,7 +598,7 @@ export async function listDocumentsByDateAsync(date: 'today' | 'yesterday', clie
 }
 
 export async function countDocumentsAsync(clientFilter?: string): Promise<number> {
-  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&select=id`
+  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&select=id`
   if (clientFilter) path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   const res = await fetch(supabaseUrl(path), {
     headers: { ...supabaseHeaders(), 'Prefer': 'count=exact' },
@@ -583,7 +622,7 @@ export async function listAllDocumentsAsync(
   docTypeFilter?: string
 ): Promise<{ docs: Document[]; total: number }> {
   const offset = Math.max(0, (page - 1) * limit)
-  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&order=created_at.desc&limit=${limit}&offset=${offset}`
+  let path = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&order=created_at.desc&limit=${limit}&offset=${offset}`
   if (clientFilter)  path += `&client_name=eq.${encodeURIComponent(clientFilter)}`
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (search) {
@@ -592,7 +631,7 @@ export async function listAllDocumentsAsync(
   }
 
   // Get total count separately
-  let totalPath = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&select=id`
+  let totalPath = `documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&select=id`
   if (clientFilter)  totalPath += `&client_name=eq.${encodeURIComponent(clientFilter)}`
   if (docTypeFilter) totalPath += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (search) {
@@ -616,9 +655,14 @@ export async function listAllDocumentsAsync(
 }
 
 export async function deleteDocumentAsync(id: string): Promise<void> {
+  // Soft-delete (tombstone), not a hard DELETE: other team members'
+  // incremental pull only asks PostgREST for rows changed since its last
+  // watermark, so a real DELETE would just vanish from that query — nobody
+  // else would ever be told to remove their local copy.
   await fetch(supabaseUrl(`documents?id=eq.${id}&team_id=eq.${encodeURIComponent(_teamId!)}`), {
-    method: 'DELETE',
+    method:  'PATCH',
     headers: supabaseHeaders(),
+    body:    JSON.stringify({ deleted: true }),
   })
 }
 
@@ -641,7 +685,7 @@ export async function getStatsAsync(): Promise<{
   byClient: { client_name: string; count: number }[]
   byType:   { doc_type: string; count: number }[]
 }> {
-  const res = await fetch(supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&select=client_name,doc_type`), { headers: supabaseHeaders() })
+  const res = await fetch(supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&deleted=eq.false&select=client_name,doc_type`), { headers: supabaseHeaders() })
   if (!res.ok) return { total: 0, byClient: [], byType: [] }
   const rows = await res.json()
   const clientMap = new Map<string, number>()
@@ -660,6 +704,8 @@ export async function getStatsAsync(): Promise<{
 export async function triggerBackgroundSync(): Promise<void> {
   if (getMode() !== 'team') return
 
+  let pushedSomething = false
+
   // 1. Push pending creations/updates (synced = 0)
   const pendingUpdates = getDb().prepare(`SELECT * FROM documents WHERE synced = 0`).all() as any[]
   for (const row of pendingUpdates) {
@@ -670,7 +716,7 @@ export async function triggerBackgroundSync(): Promise<void> {
         headers: supabaseHeaders(),
       })
       const exists = checkRes.ok && (await checkRes.json()).length > 0
-      
+
       const payload = {
         id:          doc.id,
         created_at:  doc.created_at,
@@ -678,7 +724,11 @@ export async function triggerBackgroundSync(): Promise<void> {
         doc_type:    doc.doc_type,
         description: doc.description,
         tags:        doc.tags,
-        file_url:    doc.file_url,
+        // A file:// URL only means anything on this machine — share the
+        // metadata with the team, not a dead local path (see the matching
+        // note in saveDocumentAsync, and the ON CONFLICT exclusion of
+        // file_url in pullSupabaseChanges' upsert below).
+        file_url:    doc.file_url?.startsWith('file://') ? null : doc.file_url,
         file_name:   doc.file_name,
         mime_type:   doc.mime_type,
         raw_content: doc.raw_content,
@@ -695,9 +745,10 @@ export async function triggerBackgroundSync(): Promise<void> {
           body:    JSON.stringify(payload),
         }
       )
-      
+
       if (res.ok) {
         getDb().prepare(`UPDATE documents SET synced = 1 WHERE id = ?`).run(doc.id)
+        pushedSomething = true
       }
     } catch (err) {
       console.error('[sync push error]', err)
@@ -705,72 +756,129 @@ export async function triggerBackgroundSync(): Promise<void> {
     }
   }
 
-  // 2. Push pending deletes (synced = -1)
+  // 2. Push pending deletes (synced = -1) as tombstones, not a hard DELETE —
+  // see the comment on deleteDocumentAsync for why.
   const pendingDeletes = getDb().prepare(`SELECT * FROM documents WHERE synced = -1`).all() as any[]
   for (const row of pendingDeletes) {
     try {
       const res = await fetch(supabaseUrl(`documents?id=eq.${row.id}&team_id=eq.${encodeURIComponent(_teamId!)}`), {
-        method:  'DELETE',
+        method:  'PATCH',
         headers: supabaseHeaders(),
+        body:    JSON.stringify({ deleted: true }),
       })
       if (res.ok || res.status === 404) {
         getDb().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id)
+        deleteLocalFileIfOwned(row.file_url ?? null)
+        pushedSomething = true
       }
     } catch (err) {
       console.error('[sync delete error]', err)
       break
     }
   }
+
+  if (pushedSomething) invalidateCache()
 }
 
+const LAST_PULL_KEY  = 'last_pull'
+const EPOCH          = '1970-01-01T00:00:00Z'
+const PULL_PAGE_SIZE = 200
+const PULL_MAX_PAGES = 25 // safety cap so a huge first sync can't loop forever
+
+/**
+ * Incremental pull keyed off `updated_at`, not a flat "last 100 rows" — the
+ * old version meant a team with more than 100 documents could never see
+ * anything older than that. First run (no watermark yet) walks every row,
+ * paginated; later runs only ask for what changed since the last one.
+ *
+ * Remote tombstones (`deleted = true`) delete the local row outright, even
+ * if it has unsynced local edits (synced = 0/-1) — simple last-writer-wins
+ * rule for deletes: the remote delete always wins. Non-deleted rows still
+ * only overwrite a local copy that has nothing pending of its own
+ * (`!local || local.synced === 1`), same as before.
+ */
 export async function pullSupabaseChanges(): Promise<void> {
   if (getMode() !== 'team') return
   try {
-    const res = await fetch(
-      supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&order=created_at.desc&limit=100`),
-      { headers: supabaseHeaders() }
-    )
-    if (!res.ok) return
-    const rows = await res.json() as any[]
-    
-    getDb().transaction(() => {
-      for (const row of rows) {
-        const local = getDb().prepare(`SELECT synced FROM documents WHERE id = ?`).get(row.id) as { synced: number } | undefined
-        if (!local || local.synced === 1) {
-          const doc = rowToDocFromSupabase(row)
-          
-          getDb().prepare(`
-            INSERT INTO documents
-              (id, created_at, client_name, doc_type, description, tags, file_url, file_name, mime_type, raw_content, mode, team_id, pinned, synced)
-            VALUES
-              (@id, @created_at, @client_name, @doc_type, @description, @tags, @file_url, @file_name, @mime_type, @raw_content, @mode, @team_id, @pinned, 1)
-            ON CONFLICT(id) DO UPDATE SET
-              client_name = excluded.client_name,
-              doc_type    = excluded.doc_type,
-              description = excluded.description,
-              tags        = excluded.tags,
-              file_name   = excluded.file_name,
-              pinned      = excluded.pinned,
-              synced      = 1
-          `).run({
-            id:          doc.id,
-            created_at:  doc.created_at,
-            client_name: doc.client_name,
-            doc_type:    doc.doc_type,
-            description: doc.description,
-            tags:        JSON.stringify(doc.tags),
-            file_url:    doc.file_url,
-            file_name:   doc.file_name,
-            mime_type:   doc.mime_type,
-            raw_content: doc.raw_content,
-            mode:        doc.mode,
-            team_id:     doc.team_id,
-            pinned:      doc.pinned,
-          })
+    const lastPull = getMeta(LAST_PULL_KEY) ?? EPOCH
+    let maxUpdatedAt = lastPull
+    let offset  = 0
+    let page    = 0
+    let sawRows = false
+
+    while (page < PULL_MAX_PAGES) {
+      const res = await fetch(
+        supabaseUrl(`documents?team_id=eq.${encodeURIComponent(_teamId!)}&updated_at=gte.${encodeURIComponent(lastPull)}&order=updated_at.asc&limit=${PULL_PAGE_SIZE}&offset=${offset}`),
+        { headers: supabaseHeaders() }
+      )
+      // Bail without touching the watermark — next run just retries the
+      // same range instead of silently skipping whatever this page held.
+      if (!res.ok) return
+
+      const rows = await res.json() as any[]
+      if (rows.length === 0) break
+      sawRows = true
+
+      getDb().transaction(() => {
+        for (const row of rows) {
+          if (typeof row.updated_at === 'string' && row.updated_at > maxUpdatedAt) {
+            maxUpdatedAt = row.updated_at
+          }
+
+          if (row.deleted === true) {
+            getDb().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id)
+            continue
+          }
+
+          const local = getDb().prepare(`SELECT synced FROM documents WHERE id = ?`).get(row.id) as { synced: number } | undefined
+          if (!local || local.synced === 1) {
+            const doc = rowToDocFromSupabase(row)
+
+            getDb().prepare(`
+              INSERT INTO documents
+                (id, created_at, client_name, doc_type, description, tags, file_url, file_name, mime_type, raw_content, mode, team_id, pinned, synced)
+              VALUES
+                (@id, @created_at, @client_name, @doc_type, @description, @tags, @file_url, @file_name, @mime_type, @raw_content, @mode, @team_id, @pinned, 1)
+              ON CONFLICT(id) DO UPDATE SET
+                client_name = excluded.client_name,
+                doc_type    = excluded.doc_type,
+                description = excluded.description,
+                tags        = excluded.tags,
+                file_name   = excluded.file_name,
+                pinned      = excluded.pinned,
+                synced      = 1
+                -- file_url is deliberately NOT updated here: remote rows
+                -- always carry file_url = null (see saveDocumentAsync /
+                -- triggerBackgroundSync), so overwriting it would wipe out a
+                -- local file:// link that only this machine's disk has.
+            `).run({
+              id:          doc.id,
+              created_at:  doc.created_at,
+              client_name: doc.client_name,
+              doc_type:    doc.doc_type,
+              description: doc.description,
+              tags:        JSON.stringify(doc.tags),
+              file_url:    doc.file_url,
+              file_name:   doc.file_name,
+              mime_type:   doc.mime_type,
+              raw_content: doc.raw_content,
+              mode:        doc.mode,
+              team_id:     doc.team_id,
+              pinned:      doc.pinned,
+            })
+          }
         }
-      }
-    })()
-    invalidateCache()
+      })()
+
+      if (rows.length < PULL_PAGE_SIZE) break
+      offset += PULL_PAGE_SIZE
+      page++
+    }
+
+    if (sawRows) {
+      setMeta(LAST_PULL_KEY, maxUpdatedAt)
+      invalidateCache()
+    }
   } catch (err) {
     console.error('[pull changes error]', err)
   }
