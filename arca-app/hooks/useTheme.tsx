@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
 export type ThemeName = 'purple' | 'matrix' | 'cyber' | 'ember'
 
@@ -26,7 +26,21 @@ function readTheme(): ThemeName {
   return (saved && saved in THEMES) ? (saved as ThemeName) : 'purple'
 }
 
-export function useTheme() {
+interface ThemeContextValue {
+  theme:    Theme
+  setTheme: (name: ThemeName) => void
+}
+
+// Was a plain hook with its own useState — every caller (ArcaProvider, which
+// renders the actual orb, and SettingsPanel, where the user picks a color)
+// got its own independent, unsynced copy of the theme. Picking a color in
+// Settings updated Settings' own copy (and localStorage) but never touched
+// ArcaProvider's copy, so the orb never changed color until the next full
+// app restart (a fresh mount reads localStorage again). A Context makes
+// every consumer share the same state, so a change is visible immediately.
+const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [themeName, setThemeName] = useState<ThemeName>(readTheme)
 
   const setTheme = useCallback((name: ThemeName) => {
@@ -34,5 +48,15 @@ export function useTheme() {
     localStorage.setItem(STORAGE_KEY, name)
   }, [])
 
-  return { theme: THEMES[themeName], setTheme }
+  return (
+    <ThemeContext.Provider value={{ theme: THEMES[themeName], setTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  )
+}
+
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext)
+  if (!ctx) throw new Error('useTheme() must be used within a <ThemeProvider>')
+  return ctx
 }

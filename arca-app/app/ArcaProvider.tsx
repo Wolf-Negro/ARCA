@@ -9,7 +9,7 @@ import { StatsView } from '@/components/StatsView'
 import { SpotlightSearch } from '@/components/SpotlightSearch'
 import { ClipboardToast } from '@/components/ClipboardToast'
 import { useDrop } from '@/hooks/useDrop'
-import { useTheme } from '@/hooks/useTheme'
+import { useTheme, ThemeProvider } from '@/hooks/useTheme'
 
 declare global {
   interface Window {
@@ -34,7 +34,18 @@ declare global {
   }
 }
 
+// ThemeProvider must wrap this component's own useTheme() call — not just
+// its children — so it's a separate outer component rather than something
+// this component wraps its own return value with.
 export function ArcaProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <ThemeProvider>
+      <ArcaProviderInner>{children}</ArcaProviderInner>
+    </ThemeProvider>
+  )
+}
+
+function ArcaProviderInner({ children }: { children: React.ReactNode }) {
   const [isOpen,          setIsOpen]         = useState(false)
   const [orbState,        setOrbState]       = useState<OrbState>('idle')
   const [pendingDropFile, setPendingDropFile] = useState<File | null>(null)
