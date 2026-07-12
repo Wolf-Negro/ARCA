@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS documents (
   file_name   TEXT NOT NULL,
   mime_type   TEXT,
   raw_content TEXT,
-  mode        TEXT DEFAULT 'team',
   team_id     TEXT NOT NULL,
   -- BOOLEAN, matching `deleted` below, not INTEGER — local SQLite still
   -- stores this as INTEGER 0/1, so lib/db.ts converts explicitly at the

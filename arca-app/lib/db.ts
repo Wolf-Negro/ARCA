@@ -90,7 +90,12 @@ function rowToDocFromSupabase(row: any): Document {
     file_name:   row.file_name,
     mime_type:   row.mime_type ?? null,
     raw_content: row.raw_content ?? null,
-    mode:        row.mode ?? 'team',
+    // `mode` is a local-only concept (SQLite distinguishes 'personal' vs
+    // 'team' rows) — the real Supabase table has no `mode` column at all
+    // (confirmed: sending it in an insert/update payload caused every
+    // team-mode save to fail with a PostgREST "unknown column" 400). Any row
+    // that came from Supabase is, by definition, a team row.
+    mode:        'team',
     team_id:     row.team_id ?? null,
     // Supabase's `pinned` is a real Postgres BOOLEAN; local SQLite stores it
     // as INTEGER 0/1 (see the Document type and the local CREATE TABLE
@@ -535,7 +540,9 @@ export async function saveDocumentAsync(
     file_name:   metadata.file_name,
     mime_type:   mimeType   ?? null,
     raw_content: rawContent ?? null,
-    mode:        'team',
+    // No `mode` field here — the real Supabase table has no `mode` column;
+    // sending it made PostgREST reject every team-mode insert with a 400
+    // ("unknown column"). `mode` is purely a local SQLite concept.
     team_id:     _teamId,
   }
   const res = await fetch(supabaseUrl('documents'), {
@@ -543,7 +550,19 @@ export async function saveDocumentAsync(
     headers: supabaseHeaders(),
     body: JSON.stringify(doc),
   })
-  if (!res.ok) throw new Error(`Supabase insert failed: ${res.status}`)
+  if (!res.ok) {
+    // PostgREST's response body (code/message/details/hint) is the only way
+    // to actually diagnose a failed insert — a bare status code doesn't say
+    // whether it's an unknown column, a NOT NULL violation, a type mismatch,
+    // etc. Never discard it.
+    const errorBody = await res.text().catch(() => '<no se pudo leer el cuerpo de la respuesta>')
+    console.error('[saveDocumentAsync] Supabase insert failed', {
+      status:  res.status,
+      body:    errorBody,
+      payload: { ...doc, raw_content: doc.raw_content ? `<${doc.raw_content.length} chars omitidos>` : null },
+    })
+    throw new Error(`Supabase insert failed: ${res.status} — ${errorBody}`)
+  }
   const rows = await res.json()
   return rowToDocFromSupabase(Array.isArray(rows) ? rows[0] : rows)
 }
@@ -740,7 +759,8 @@ export async function triggerBackgroundSync(): Promise<void> {
         file_name:   doc.file_name,
         mime_type:   doc.mime_type,
         raw_content: doc.raw_content,
-        mode:        doc.mode,
+        // No `mode` field — see the matching note in saveDocumentAsync: the
+        // real Supabase table has no `mode` column, `mode` is local-only.
         team_id:     doc.team_id,
         // doc.pinned is local SQLite's INTEGER 0/1; Supabase's `pinned` is a
         // real BOOLEAN column — send an actual JS boolean (same idea as
@@ -761,6 +781,17 @@ export async function triggerBackgroundSync(): Promise<void> {
       if (res.ok) {
         getDb().prepare(`UPDATE documents SET synced = 1 WHERE id = ?`).run(doc.id)
         pushedSomething = true
+      } else {
+        // Previously silent: a failing push just left synced=0 forever,
+        // retried every cycle with no clue why. Same reasoning as
+        // saveDocumentAsync — the PostgREST response body is the only way
+        // to tell an unknown-column error from a NOT NULL violation, etc.
+        const errorBody = await res.text().catch(() => '<no se pudo leer el cuerpo de la respuesta>')
+        console.error('[sync push error] Supabase rechazó el push', {
+          status:  res.status,
+          body:    errorBody,
+          payload: { ...payload, raw_content: payload.raw_content ? `<${payload.raw_content.length} chars omitidos>` : null },
+        })
       }
     } catch (err) {
       console.error('[sync push error]', err)
@@ -782,6 +813,9 @@ export async function triggerBackgroundSync(): Promise<void> {
         getDb().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id)
         deleteLocalFileIfOwned(row.file_url ?? null)
         pushedSomething = true
+      } else {
+        const errorBody = await res.text().catch(() => '<no se pudo leer el cuerpo de la respuesta>')
+        console.error('[sync delete error] Supabase rechazó el tombstone', { status: res.status, body: errorBody, id: row.id })
       }
     } catch (err) {
       console.error('[sync delete error]', err)
