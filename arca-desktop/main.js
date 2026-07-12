@@ -7,7 +7,6 @@ const {
 const path   = require('path')
 const fs     = require('fs')
 const http   = require('http')
-const https  = require('https')
 const crypto = require('crypto')
 const { spawn, exec } = require('child_process')
 const { autoUpdater } = require('electron-updater')
@@ -17,6 +16,11 @@ const { createTray } = require('./tray')
 const ORB_SIZE      = 150           // orb-only mode
 const PANEL_W       = 420           // panel width
 const PANEL_H       = 650           // panel height
+// ClipboardToast.tsx renders at width:340 + 16px padding each side + 1px
+// border each side (~374px) and needs ~140px of vertical content — 320x120
+// was clipping it on both axes. Sized with margin to spare.
+const TOAST_W       = 380
+const TOAST_H       = 170
 const WIN_MARGIN    = 10            // screen-edge margin
 const DEFAULT_PORT  = 3000
 let   NEXT_URL       = `http://localhost:${DEFAULT_PORT}`   // reassigned once the real port is known
@@ -644,10 +648,10 @@ function registerIPC() {
         savedOrbY = wy
       }
 
-      win.setMinimumSize(320, 120)
-      const newX = dx + dw - 320 - WIN_MARGIN
-      const newY = dy + dh - 120 - WIN_MARGIN
-      win.setBounds({ x: newX, y: newY, width: 320, height: 120 }, false)
+      win.setMinimumSize(TOAST_W, TOAST_H)
+      const newX = dx + dw - TOAST_W - WIN_MARGIN
+      const newY = dy + dh - TOAST_H - WIN_MARGIN
+      win.setBounds({ x: newX, y: newY, width: TOAST_W, height: TOAST_H }, false)
       win.show()
     } else {
       win.setMinimumSize(ORB_SIZE, ORB_SIZE)
@@ -705,39 +709,6 @@ function registerIPC() {
     if (!cfg) return cfg
     // adminSecret travels over IPC only — never written to arca-config.json.
     return { ...cfg, adminSecret: ADMIN_SECRET }
-  })
-
-  // ── Onboarding: verify a user-supplied Supabase project (runs the HTTPS
-  // request in main so onboarding.html never needs raw Node `https` access) ──
-  ipcMain.handle('verify-supabase', (_event, payload) => {
-    const hostname = payload?.hostname
-    const key      = payload?.key
-    return new Promise((resolve) => {
-      if (typeof hostname !== 'string' || !hostname || typeof key !== 'string' || !key) {
-        resolve({ ok: false })
-        return
-      }
-      if (!/^[a-z0-9-]+\.supabase\.co$/i.test(hostname)) {
-        resolve({ ok: false })
-        return
-      }
-      const req = https.request({
-        hostname,
-        path:    '/rest/v1/',
-        method:  'GET',
-        timeout: 8000,
-        headers: {
-          apikey:        key,
-          Authorization: 'Bearer ' + key,
-        },
-      }, (res) => {
-        res.resume()
-        resolve({ ok: res.statusCode >= 200 && res.statusCode < 500, statusCode: res.statusCode })
-      })
-      req.on('error',   () => resolve({ ok: false }))
-      req.on('timeout', () => { req.destroy(); resolve({ ok: false }) })
-      req.end()
-    })
   })
 }
 

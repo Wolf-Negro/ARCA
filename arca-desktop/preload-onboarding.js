@@ -11,8 +11,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Opens a URL (e.g. supabase.com signup) in the system browser.
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
-
-  // Verifies a user-supplied Supabase project/key by pinging its REST root.
-  // The actual HTTPS request runs in the main process (see main.js).
-  verifySupabase: (hostname, key) => ipcRenderer.invoke('verify-supabase', { hostname, key }),
 })

@@ -311,47 +311,6 @@
 
     </div>
 
-    <!-- ══════════════════════════════════════
-         STEP 2A — Personal storage choice
-    ══════════════════════════════════════ -->
-    <div id="step2a" class="step">
-
-      <button class="btn-back" id="back2a">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Volver
-      </button>
-
-      <div style="font-size:22px; font-weight:700; letter-spacing:-0.3px;">¿Dónde guardamos tus links?</div>
-
-      <div style="display:flex; gap:12px;">
-        <div class="card card-purple" data-anim="1" id="cardLocal">
-          <div style="font-size:26px;">💻</div>
-          <div style="font-size:15px; font-weight:700;">Solo esta PC</div>
-          <div style="display:flex; flex-direction:column; gap:4px; font-size:11.5px; flex:1;">
-            <span style="color:rgba(100,220,130,0.9);">✓ Sin configurar nada</span>
-            <span style="color:rgba(100,220,130,0.9);">✓ Instantáneo</span>
-            <span style="color:rgba(100,220,130,0.9);">✓ Sin internet</span>
-            <span style="color:rgba(255,100,100,0.8);">✗ Solo en este equipo</span>
-          </div>
-          <button class="btn-primary">Usar esta PC</button>
-        </div>
-        <div class="card card-dim" data-anim="2" id="cardCloud">
-          <div style="font-size:26px;">☁️</div>
-          <div style="font-size:15px; font-weight:700;">Mi nube personal</div>
-          <div style="display:flex; flex-direction:column; gap:4px; font-size:11.5px; flex:1;">
-            <span style="color:rgba(100,220,130,0.9);">✓ Desde cualquier PC</span>
-            <span style="color:rgba(100,220,130,0.9);">✓ Nunca pierdes datos</span>
-            <span style="color:rgba(100,220,130,0.9);">✓ Gratis con Supabase</span>
-            <span style="color:rgba(255,100,100,0.8);">✗ Requiere configuración</span>
-            <span style="color:rgba(255,100,100,0.8);">✗ Necesitas internet</span>
-          </div>
-          <button class="btn-outlined">Conectar nube</button>
-        </div>
-      </div>
-
-    </div>
 
     <!-- ══════════════════════════════════════
          STEP 2B — Team activation code
@@ -413,56 +372,6 @@
 
     </div>
 
-    <!-- ══════════════════════════════════════
-         STEP 3B — Supabase credentials
-    ══════════════════════════════════════ -->
-    <div id="step3b" class="step">
-
-      <button class="btn-back" id="back3b">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <path d="M9 2L4 7L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Volver
-      </button>
-
-      <div style="font-size:22px; font-weight:700; letter-spacing:-0.3px;">Conecta tu Supabase</div>
-
-      <button id="btnSupabaseLink" style="background:transparent; border:none; color:rgba(83,74,183,0.9); font-size:12.5px; cursor:pointer; font-family:inherit; padding:0; text-decoration:underline; text-underline-offset:2px; text-align:left; margin-top:-12px;">
-        Crear cuenta gratis → supabase.com
-      </button>
-
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:12px; font-weight:500; color:rgba(255,255,255,0.55);">URL del proyecto</label>
-          <input
-            type="url"
-            id="supabaseUrl"
-            placeholder="https://xxxx.supabase.co"
-            spellcheck="false"
-            autocomplete="off"
-            style="width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; color:white; font-size:12.5px; font-family:'Consolas','Menlo',monospace; outline:none; user-select:text; -webkit-user-select:text;"
-          >
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px;">
-          <label style="font-size:12px; font-weight:500; color:rgba(255,255,255,0.55);">Clave anon (anon public)</label>
-          <input
-            type="text"
-            id="supabaseKey"
-            placeholder="eyJhbGci..."
-            spellcheck="false"
-            autocomplete="off"
-            style="width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:10px 12px; color:white; font-size:12.5px; font-family:'Consolas','Menlo',monospace; outline:none; user-select:text; -webkit-user-select:text;"
-          >
-        </div>
-      </div>
-
-      <div id="supabaseMsg" style="display:none; font-size:12px; padding:8px 12px; border-radius:8px;"></div>
-
-      <button class="btn-large" id="btnVerifySupabase" style="background:#534AB7; color:white;">Verificar conexión</button>
-      <button class="btn-large" id="btnEnterSupabase" style="background:#534AB7; color:white; display:none;">Entrar a ARCA</button>
-
-    </div>
-
   </div><!-- /.steps-wrapper -->
 
   <!-- Progress dots -->
@@ -476,12 +385,19 @@
 
 <script>
   // ── Step registry ──
+  // Personal mode has no "where do we save" question anymore (step2a) — it's
+  // always local SQLite, straight from step1 to step3a. The only other
+  // choice used to be a personal Supabase project (step3b), which broke
+  // outright once RLS started requiring a signed per-agency JWT (see the
+  // "team isolation" policy in supabase/schema.sql): a plain anon key
+  // authenticates as role 'anon', which no longer matches any policy, so
+  // every read/write silently failed. Removed rather than fixed — it was
+  // redundant with the real team/agency activation flow, which does the
+  // same job with actual isolation.
   const steps = {
     step1:  document.getElementById('step1'),
-    step2a: document.getElementById('step2a'),
     step2b: document.getElementById('step2b'),
     step3a: document.getElementById('step3a'),
-    step3b: document.getElementById('step3b'),
   }
 
   const dots = [
@@ -492,10 +408,8 @@
 
   const stepDots = {
     step1:  [1, 0, 0],
-    step2a: [1, 1, 0],
     step2b: [1, 1, 0],
     step3a: [1, 1, 1],
-    step3b: [1, 1, 1],
   }
 
   let currentStep = 'step1'
@@ -547,27 +461,14 @@
   // ══════════════════════════════════════
   // STEP 1 — Mode selection
   // ══════════════════════════════════════
+  // Personal mode is always local SQLite now — no more "where do we save"
+  // detour (see the note above the `steps` registry).
   document.getElementById('cardPersonal').addEventListener('click', function() {
-    goTo('step2a')
+    goTo('step3a')
   })
 
   document.getElementById('cardTeam').addEventListener('click', function() {
     goTo('step2b')
-  })
-
-  // ══════════════════════════════════════
-  // STEP 2A — Personal storage choice
-  // ══════════════════════════════════════
-  document.getElementById('back2a').addEventListener('click', function() {
-    goTo('step1', 'back')
-  })
-
-  document.getElementById('cardLocal').addEventListener('click', function() {
-    goTo('step3a')
-  })
-
-  document.getElementById('cardCloud').addEventListener('click', function() {
-    goTo('step3b')
   })
 
   // ══════════════════════════════════════
@@ -667,76 +568,6 @@
   // ══════════════════════════════════════
   document.getElementById('btnStartLocal').addEventListener('click', function() {
     window.electronAPI.sendOnboardingComplete({ mode: 'personal', storage: 'local' })
-  })
-
-  // ══════════════════════════════════════
-  // STEP 3B — Supabase credentials
-  // ══════════════════════════════════════
-  document.getElementById('btnSupabaseLink').addEventListener('click', function() {
-    window.electronAPI.openExternal('https://supabase.com')
-  })
-
-  document.getElementById('back3b').addEventListener('click', function() {
-    goTo('step2a', 'back')
-  })
-
-  var supabaseMsg      = document.getElementById('supabaseMsg')
-  var btnVerifySupabase = document.getElementById('btnVerifySupabase')
-  var btnEnterSupabase  = document.getElementById('btnEnterSupabase')
-
-  function showSupabaseError() {
-    supabaseMsg.textContent = 'No se pudo conectar. Verifica tus credenciales.'
-    supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
-    btnVerifySupabase.disabled = false
-    btnVerifySupabase.textContent = 'Verificar conexión'
-  }
-
-  btnVerifySupabase.addEventListener('click', function() {
-    var rawUrl = document.getElementById('supabaseUrl').value.trim()
-    var key    = document.getElementById('supabaseKey').value.trim()
-
-    supabaseMsg.style.display = 'none'
-    btnEnterSupabase.style.display = 'none'
-
-    if (!rawUrl || !key) {
-      supabaseMsg.textContent = 'Completa todos los campos.'
-      supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
-      return
-    }
-
-    var hostname
-    try {
-      hostname = new URL(rawUrl).hostname
-    } catch (e) {
-      supabaseMsg.textContent = 'URL inválida.'
-      supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(255,80,80,0.1); color:rgba(255,100,100,0.9); border:1px solid rgba(255,80,80,0.2);'
-      return
-    }
-
-    btnVerifySupabase.disabled = true
-    btnVerifySupabase.textContent = 'Verificando...'
-
-    window.electronAPI.verifySupabase(hostname, key).then(function(result) {
-      if (result && result.ok) {
-        supabaseMsg.textContent = '✓ Conexión exitosa'
-        supabaseMsg.style.cssText = 'display:block; font-size:12px; padding:8px 12px; border-radius:8px; background:rgba(100,220,130,0.08); color:rgba(100,220,130,0.9); border:1px solid rgba(100,220,130,0.2);'
-        btnVerifySupabase.style.display = 'none'
-        btnEnterSupabase.style.display = 'block'
-      } else {
-        showSupabaseError()
-      }
-    }).catch(function() {
-      showSupabaseError()
-    })
-  })
-
-  btnEnterSupabase.addEventListener('click', function() {
-    window.electronAPI.sendOnboardingComplete({
-      mode: 'personal',
-      storage: 'supabase',
-      supabaseUrl: document.getElementById('supabaseUrl').value.trim(),
-      supabaseKey: document.getElementById('supabaseKey').value.trim(),
-    })
   })
 
   // ── Init ──
