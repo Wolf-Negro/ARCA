@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdirSync, existsSync } from 'fs'
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, basename, join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { DocumentMetadata } from './metadata'
@@ -12,13 +12,46 @@ let _supabaseUrl: string | null = null
 let _supabaseKey: string | null = null
 let _teamId:      string | null = null
 
+// Team config only ever lived in RAM before — a Next.js server restart
+// (without the Electron renderer re-running its init-team fetch) silently
+// dropped back to personal mode. Persisted next to the DB file so getMode()
+// can recover it on its own.
+const TEAM_CONFIG_PATH = join(dirname(DB_PATH), 'team-config.json')
+let _triedLoadTeamConfig = false
+
+function loadPersistedTeamConfig(): void {
+  if (_triedLoadTeamConfig) return
+  _triedLoadTeamConfig = true
+  try {
+    const raw = readFileSync(TEAM_CONFIG_PATH, 'utf-8')
+    const cfg = JSON.parse(raw) as { supabaseUrl?: string, supabaseKey?: string, teamId?: string }
+    if (cfg.supabaseUrl && cfg.supabaseKey && cfg.teamId) {
+      _supabaseUrl = cfg.supabaseUrl
+      _supabaseKey = cfg.supabaseKey
+      _teamId      = cfg.teamId
+    }
+  } catch {
+    // No persisted config yet, or unreadable — stay in personal mode.
+  }
+}
+
 export function setTeamConfig(supabaseUrl: string, supabaseKey: string, teamId: string): void {
   _supabaseUrl = supabaseUrl
   _supabaseKey = supabaseKey
   _teamId      = teamId
+  _triedLoadTeamConfig = true // this call is now the source of truth, no need to load from disk
+  try {
+    // Same exposure level as arca-config.json (plaintext on disk) — mitigated
+    // in a later phase by moving to a per-agency JWT instead of a shared key.
+    writeFileSync(TEAM_CONFIG_PATH, JSON.stringify({ supabaseUrl, supabaseKey, teamId }), 'utf-8')
+  } catch {
+    // Best-effort — team mode still works for the current process even if
+    // this write fails, it just won't survive a server restart.
+  }
 }
 
 export function getMode(): 'personal' | 'team' {
+  if (!_supabaseUrl) loadPersistedTeamConfig()
   return (_supabaseUrl && _supabaseKey && _teamId) ? 'team' : 'personal'
 }
 

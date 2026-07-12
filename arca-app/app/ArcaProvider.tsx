@@ -29,7 +29,7 @@ declare global {
       moveWindow?:           (x: number, y: number) => void
       snapToEdge?:           () => void
       hideWindow?:           () => void
-      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; teamId?: string } | null>
+      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; teamId?: string; adminSecret?: string } | null>
     }
   }
 }
@@ -68,9 +68,16 @@ export function ArcaProvider({ children }: { children: React.ReactNode }) {
       if (cfg.supabaseUrl && cfg.supabaseKey) {
         fetch('/api/init-team', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(cfg.adminSecret ? { 'x-arca-admin-secret': cfg.adminSecret } : {}),
+          },
           body: JSON.stringify({ supabaseUrl: cfg.supabaseUrl, supabaseKey: cfg.supabaseKey, teamId: cfg.teamId }),
-        }).catch(() => {/* best-effort */})
+        }).then(async res => {
+          if (!res.ok) {
+            console.error('[ARCA] init-team falló:', res.status, await res.text().catch(() => ''))
+          }
+        }).catch(err => console.error('[ARCA] init-team falló:', err))
       }
     })
   }, [])

@@ -4,10 +4,11 @@ const {
   app, BrowserWindow, globalShortcut,
   screen, ipcMain, shell, session, clipboard, systemPreferences,
 } = require('electron')
-const path  = require('path')
-const fs    = require('fs')
-const http  = require('http')
-const https = require('https')
+const path   = require('path')
+const fs     = require('fs')
+const http   = require('http')
+const https  = require('https')
+const crypto = require('crypto')
 const { spawn, exec } = require('child_process')
 const { autoUpdater } = require('electron-updater')
 const { createTray } = require('./tray')
@@ -27,6 +28,11 @@ let   NEXT_URL       = `http://localhost:${DEFAULT_PORT}`   // reassigned once t
 const INITIAL_DELAY = 5000          // ms — wait for Next.js to compile
 const RETRY_MS      = 3000          // ms — between retry attempts
 const MAX_RETRIES   = 20
+
+// Generated fresh per launch, never persisted to disk: arca-app's
+// /api/init-team requires this header to reconfigure team/Supabase sync.
+// It's handed to the renderer only over IPC (see 'get-config' below).
+const ADMIN_SECRET = crypto.randomBytes(32).toString('hex')
 
 /** @type {BrowserWindow|null} */ let win     = null
 /** @type {import('electron').Tray|null} */ let tray = null
@@ -135,6 +141,7 @@ function buildServerEnv(port) {
     HOSTNAME: '127.0.0.1',
     ARCA_DB_PATH:      path.join(app.getPath('userData'), 'arca-data', 'arca.db'),
     ARCA_UPLOADS_PATH: path.join(app.getPath('userData'), 'arca-data', 'uploads'),
+    ARCA_ADMIN_SECRET: ADMIN_SECRET,
   }
 }
 
@@ -745,7 +752,12 @@ function registerIPC() {
     onboardingWin = createOnboardingWindow()
   })
 
-  ipcMain.handle('get-config', () => loadConfig())
+  ipcMain.handle('get-config', () => {
+    const cfg = loadConfig()
+    if (!cfg) return cfg
+    // adminSecret travels over IPC only — never written to arca-config.json.
+    return { ...cfg, adminSecret: ADMIN_SECRET }
+  })
 
   // ── Onboarding: verify a user-supplied Supabase project (runs the HTTPS
   // request in main so onboarding.html never needs raw Node `https` access) ──
