@@ -18,12 +18,12 @@ CREATE TABLE IF NOT EXISTS documents (
   raw_content TEXT,
   mode        TEXT DEFAULT 'team',
   team_id     TEXT NOT NULL,
-  -- INTEGER (0/1), not BOOLEAN, to mirror the local SQLite column exactly —
-  -- lib/db.ts's rowToDocFromSupabase does `row.pinned ?? 0`, which only
-  -- falls back to 0 when the value is null/undefined; a Postgres `false`
-  -- would pass through as-is and silently mix booleans with numbers in the
-  -- same in-memory Document[] array.
-  pinned      INTEGER     DEFAULT 0,
+  -- BOOLEAN, matching `deleted` below, not INTEGER — local SQLite still
+  -- stores this as INTEGER 0/1, so lib/db.ts converts explicitly at the
+  -- boundary in both directions (rowToDocFromSupabase on read,
+  -- triggerBackgroundSync's push payload on write) rather than relying on
+  -- Postgres/PostgREST to coerce between the two representations.
+  pinned      BOOLEAN     DEFAULT false,
   deleted     BOOLEAN     DEFAULT false,
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );

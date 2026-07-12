@@ -15,8 +15,9 @@
 -- mode — the exact same category of bug as uploaded_by, just not yet hit in
 -- testing because scripts/test-rls-isolation.mjs doesn't exercise pin/sync.
 --
--- Not yet confirmed against the real production table (unlike
--- uploaded_by) — run this once you've verified whether `pinned` is already
--- there or not.
+-- Already applied directly in production as BOOLEAN (to match `deleted`'s
+-- type rather than mirroring local SQLite's INTEGER 0/1) — kept here so any
+-- other existing project can run the same fix. lib/db.ts converts explicitly
+-- between this BOOLEAN and local SQLite's INTEGER at the sync boundary.
 
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS pinned INTEGER DEFAULT 0;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS pinned BOOLEAN DEFAULT false;

@@ -92,7 +92,15 @@ function rowToDocFromSupabase(row: any): Document {
     raw_content: row.raw_content ?? null,
     mode:        row.mode ?? 'team',
     team_id:     row.team_id ?? null,
-    pinned:      row.pinned ?? 0,
+    // Supabase's `pinned` is a real Postgres BOOLEAN; local SQLite stores it
+    // as INTEGER 0/1 (see the Document type and the local CREATE TABLE
+    // below). `row.pinned ?? 0` would let a Postgres `false` pass through
+    // as-is instead of coercing to 0 — `??` only replaces null/undefined,
+    // not falsy values — leaving a stray JS boolean in a Document that's
+    // otherwise all-numbers, and better-sqlite3 rejects binding a boolean
+    // as a bound parameter outright (pullSupabaseChanges' upsert below
+    // would throw the first time a pinned=false row synced down).
+    pinned:      row.pinned ? 1 : 0,
     synced:      row.synced ?? 1,
   }
 }
@@ -734,7 +742,11 @@ export async function triggerBackgroundSync(): Promise<void> {
         raw_content: doc.raw_content,
         mode:        doc.mode,
         team_id:     doc.team_id,
-        pinned:      doc.pinned,
+        // doc.pinned is local SQLite's INTEGER 0/1; Supabase's `pinned` is a
+        // real BOOLEAN column — send an actual JS boolean (same idea as
+        // `deleted: true` elsewhere) rather than relying on Postgres/
+        // PostgREST to coerce a bare JSON number into a boolean.
+        pinned:      !!doc.pinned,
       }
 
       const res = await fetch(
