@@ -1,8 +1,11 @@
-// Metadata extraction — pure rule-based, no external API.
-// Uses URL patterns + OG tags for instant, free, reliable results.
+// Metadata extraction — rule-based core (URL patterns + OG tags: instant,
+// free, offline) optionally enriched by Gemini when an API key is configured.
+// The rules always run first and remain the fallback if Gemini is
+// unavailable, so the app never depends on the cloud.
 
 export type { DocumentMetadata } from './types'
 import type { DocumentMetadata } from './types'
+import { extractMetadataWithGemini, extractTextFromImageWithGemini } from './gemini'
 
 // ─── Doc-type inference ───────────────────────────────────────────────────────
 
@@ -117,26 +120,42 @@ function buildTags(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function extractDocumentMetadata(
-  _content:    string,
-  filename?:   string,
-  url?:        string,
-  clientName?: string,
+  content:      string,
+  filename?:    string,
+  url?:         string,
+  clientName?:  string,
   og?: { title?: string; description?: string; type?: string; image?: string },
-  mimeType?:   string
+  mimeType?:    string,
+  knownClients?: string[]
 ): Promise<DocumentMetadata> {
   const docType =
     (url      ? docTypeFromUrl(url)          : null) ??
     (mimeType ? (MIME_DOCTYPE[mimeType]      ?? null) : null) ??
     'Presentación'
 
-  const resolvedClient = clientName ?? null
-  const fileName       = buildFileName(og, filename, url, docType)
-  const description    = buildDescription(og, docType, fileName)
-  const tags           = buildTags(url, docType, resolvedClient)
+  let resolvedClient = clientName ?? null
+  let fileName       = buildFileName(og, filename, url, docType)
+  let description    = buildDescription(og, docType, fileName)
+  let resolvedType   = docType
 
-  return { client_name: resolvedClient, doc_type: docType, description, tags, file_name: fileName }
+  // Optional Gemini enrichment — a null result leaves the rule-based values
+  // untouched, so a missing key / offline machine changes nothing.
+  const ai = await extractMetadataWithGemini({ content, filename, url, og, mimeType, knownClients })
+  if (ai) {
+    if (ai.doc_type)                       resolvedType   = ai.doc_type
+    if (ai.file_name)                      fileName       = ai.file_name
+    if (ai.description)                    description    = ai.description
+    if (!resolvedClient && ai.client_name) resolvedClient = ai.client_name
+  }
+
+  const tags = buildTags(url, resolvedType, resolvedClient)
+  for (const t of ai?.tags ?? []) {
+    if (!tags.some((existing) => existing.toLowerCase() === t.toLowerCase())) tags.push(t)
+  }
+
+  return { client_name: resolvedClient, doc_type: resolvedType, description, tags, file_name: fileName }
 }
 
-export async function extractTextFromImageUrl(_base64: string, _mimeType: string): Promise<string> {
-  return ''
+export async function extractTextFromImageUrl(base64: string, mimeType: string): Promise<string> {
+  return extractTextFromImageWithGemini(base64, mimeType)
 }

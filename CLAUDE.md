@@ -39,21 +39,30 @@ npm run build    # Production build
 
 ### arca-app: Local-First Data Layer
 
-**No OpenAI is used in arca-app.** Data lives in a local SQLite database (via `better-sqlite3`, WAL mode):
+Data lives in a local SQLite database (via `better-sqlite3`, WAL mode):
 
 - **Path**: `./arca-data/arca.db` (overridable via `ARCA_DB_PATH` env var)
 - **Uploads**: `./arca-data/uploads/` — files stored locally, referenced as `file://` URLs
-- **`lib/db.ts`** — wraps the SQLite connection; also implements an optional **team mode** that syncs documents to a Supabase project (`app/api/init-team/route.ts` configures `supabaseUrl`/`supabaseKey`/`teamId`, protected by the `ARCA_ADMIN_SECRET` header). Team mode is opt-in; local SQLite is the default and requires no cloud config.
-- **`lib/openai.ts`** — shim that re-exports from `lib/metadata.ts` (no actual OpenAI calls)
+- **`lib/db.ts`** — wraps the SQLite connection; also implements an optional **team mode** that syncs documents to a Supabase project (`app/api/init-team/route.ts` configures `supabaseUrl`/`supabaseKey`/`teamId`, protected by the `ARCA_ADMIN_SECRET` header). Team mode is opt-in; local SQLite is the default and requires no cloud config. Also exposes `getMeta`/`setMeta` (key/value `meta` table) used for sync bookkeeping and the Gemini API key.
+- **`lib/openai.ts`** — legacy shim that re-exports from `lib/metadata.ts` (no OpenAI calls anywhere)
 
-**arca-app has no required environment variables** for local-only use. `ARCA_DB_PATH` is optional. `ARCA_ADMIN_SECRET` is required only to enable the `/api/init-team` endpoint (team/Supabase sync mode).
+**arca-app has no required environment variables** for local-only use. `ARCA_DB_PATH` and `GEMINI_API_KEY` are optional. `ARCA_ADMIN_SECRET` is required only to enable the `/api/init-team` endpoint (team/Supabase sync mode).
 
-### arca-app: Metadata Extraction (Rule-Based, No LLM)
+### arca-app: Gemini (Optional Intelligence Layer)
+
+`lib/gemini.ts` is the only file that talks to Google's Gemini API (`gemini-2.5-flash`, REST via fetch, no SDK). **Every function degrades to `null`/`''` on any failure** (no key, offline, quota, bad JSON) and callers silently fall back to the rule-based path — the app never requires the cloud. The API key comes from `GEMINI_API_KEY` env var or, more commonly, the `meta` table in SQLite, set from the in-app settings screen (`GeminiSection` in `ChatPanel.tsx`) via `/api/settings` (which live-validates the key before persisting). Three capabilities:
+
+1. **Metadata enrichment** — `extractMetadataWithGemini` infers `doc_type` (restricted to the `DOC_TYPES` closed set in `lib/types.ts`), `description`, `tags`, `file_name`, and `client_name` (only if it matches an existing client — never invented) from the extracted document content. Merged over the rule-based result in `lib/metadata.ts::extractDocumentMetadata`.
+2. **Image OCR** — `extractTextFromImageWithGemini` fills the previously-stubbed `extractTextFromImageUrl` (vision OCR + short description for uploaded images).
+3. **Natural-language chat** — `interpretChatWithGemini` classifies a free-form message into an ARCA action (`search | list_all | list_today | list_yesterday | count | stats | library | open | answer | help`), used by `/api/assistant`.
+
+### arca-app: Metadata Extraction (Rules + Optional Gemini)
 
 `lib/metadata.ts` infers doc type, file name, description, and tags using:
 1. URL hostname pattern matching (google.com → "Google Doc", figma.com → "Creativo / Imagen", etc.)
 2. MIME type mapping (PDF → "Presentación", XLSX → "Presupuesto", etc.)
 3. OG tags scraped from fetched HTML (`lib/fileHandler.ts::fetchUrlContent`)
+4. Optionally, Gemini enrichment over the extracted content (see section above) — rules always run first and stand when Gemini is unavailable.
 
 `lib/fileHandler.ts` handles text extraction (pdf-parse, mammoth, xlsx) and URL fetching. `assertSafeUrl` (async) blocks SSRF: it rejects private/loopback/link-local hostnames by string match AND resolves DNS (`dns.promises.lookup`, all records) to reject hosts that resolve to a private/internal IP (DNS-rebinding protection). There's also an auth-only domain fast-path that skips the HTTP fetch for services that always require login.
 
@@ -70,6 +79,8 @@ npm run build    # Production build
 | `/api/init-team` | POST | Configures team/Supabase sync mode. Requires `x-arca-admin-secret` header matching `ARCA_ADMIN_SECRET` (503 if unset, 403 if wrong); validates `supabaseUrl` via `assertSafeUrl` before connecting. |
 | `/api/sync` | POST | Pushes local unsynced changes to Supabase, then pulls remote changes into local SQLite (team mode). |
 | `/api/stats` | GET | Aggregate counts by client and doc type. |
+| `/api/settings` | GET / POST | GET returns Gemini key status (`configured`/`source`/`masked`, never the full key). POST validates a new key against Gemini live before persisting it to the `meta` table; empty string removes it. |
+| `/api/assistant` | POST | Natural-language chat backend. Builds compact context (stats + recent docs + fuzzy matches), asks Gemini for an action, executes it server-side and returns `{handled, message, results?, ui?, openUrl?}`. `{handled:false}` whenever Gemini is unconfigured/unreachable → client falls back to its regex pipeline. |
 
 ### arca-app: Security
 
@@ -88,7 +99,8 @@ npm run build    # Production build
 
 **`hooks/useChat.ts`** is the core command parser and state machine. It handles:
 - URL detection → `POST /api/save` flow with 3-step confirmation (propose → client? → confirm)
-- Text commands parsed by regex (no LLM) for list/search/open/copy/stats/library/count
+- Text commands parsed by regex fast-paths for list/search/open/copy/stats/library/count
+- Anything the regexes don't recognize goes to `POST /api/assistant` (Gemini) first; `{handled:false}` falls through to the local fuzzy search, so behavior without a key is identical to before
 - File drag-drop → `POST /api/upload` → `POST /api/save` flow
 - `pendingMetadata` + `pendingFileData` state for the confirm-before-save pattern
 - Message history navigation (up/down arrow, last 5 messages)

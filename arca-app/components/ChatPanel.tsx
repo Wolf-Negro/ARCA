@@ -168,6 +168,149 @@ function GearIcon() {
   )
 }
 
+// ── Gemini (IA) section ───────────────────────────────────────────────────────
+
+function GeminiSection() {
+  const [status, setStatus]     = useState<{ configured: boolean; source: 'env' | 'local' | null; masked: string | null } | null>(null)
+  const [keyInput, setKeyInput] = useState('')
+  const [busy, setBusy]         = useState(false)
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const loadStatus = () => {
+    fetch('/api/settings')
+      .then((r) => r.json())
+      .then((d) => setStatus(d.gemini ?? { configured: false, source: null, masked: null }))
+      .catch(() => setStatus({ configured: false, source: null, masked: null }))
+  }
+
+  useEffect(loadStatus, [])
+
+  const submitKey = async (value: string) => {
+    setBusy(true)
+    setFeedback(null)
+    try {
+      const res  = await fetch('/api/settings', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ geminiApiKey: value }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setKeyInput('')
+        setFeedback(value
+          ? { ok: true,  text: '✓ Gemini activado — el chat y la clasificación ahora usan IA.' }
+          : { ok: true,  text: 'Key eliminada. ARCA vuelve al modo local.' })
+        loadStatus()
+      } else {
+        setFeedback({ ok: false, text: data.error ?? 'No se pudo guardar la key.' })
+      }
+    } catch {
+      setFeedback({ ok: false, text: 'No se pudo guardar la key. Intenta de nuevo.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openAiStudio = () => {
+    const api = (window as Window & { electronAPI?: { openExternal?: (u: string) => Promise<void> } }).electronAPI
+    const url = 'https://aistudio.google.com/apikey'
+    if (api?.openExternal) void api.openExternal(url)
+    else window.open(url, '_blank')
+  }
+
+  return (
+    <section>
+      <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+        Inteligencia artificial
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>Gemini</span>
+        <span style={{
+          fontSize:     11,
+          fontWeight:   500,
+          padding:      '2px 8px',
+          borderRadius: 6,
+          background:   status?.configured ? 'rgba(80,200,120,0.15)' : 'rgba(255,255,255,0.07)',
+          border:       `1px solid ${status?.configured ? 'rgba(80,200,120,0.4)' : 'rgba(255,255,255,0.12)'}`,
+          color:        status?.configured ? 'rgb(120,220,150)' : 'rgba(255,255,255,0.5)',
+        }}>
+          {status === null ? '...' : status.configured ? `Activo ${status.masked ?? ''}` : 'No configurado'}
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        <input
+          type="password"
+          value={keyInput}
+          onChange={(e) => setKeyInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && keyInput.trim() && !busy) void submitKey(keyInput.trim()) }}
+          placeholder={status?.configured ? 'Pegar una key nueva...' : 'Pegar tu API key de Gemini...'}
+          disabled={busy}
+          style={{
+            flex:         1,
+            minWidth:     0,
+            background:   'rgba(255,255,255,0.06)',
+            border:       '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 8,
+            padding:      '7px 10px',
+            fontSize:     12,
+            color:        'rgba(255,255,255,0.85)',
+            outline:      'none',
+          }}
+        />
+        <button
+          onClick={() => { if (keyInput.trim()) void submitKey(keyInput.trim()) }}
+          disabled={busy || !keyInput.trim()}
+          style={{
+            background:   'rgba(255,255,255,0.09)',
+            border:       '1px solid rgba(255,255,255,0.14)',
+            borderRadius: 8,
+            color:        'rgba(255,255,255,0.8)',
+            fontSize:     12,
+            padding:      '0 12px',
+            cursor:       busy || !keyInput.trim() ? 'default' : 'pointer',
+            opacity:      busy || !keyInput.trim() ? 0.5 : 1,
+            whiteSpace:   'nowrap',
+          }}
+        >
+          {busy ? '...' : 'Guardar'}
+        </button>
+      </div>
+
+      {feedback && (
+        <p style={{ fontSize: 11, marginBottom: 8, color: feedback.ok ? 'rgb(120,220,150)' : 'rgb(240,140,140)' }}>
+          {feedback.text}
+        </p>
+      )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button
+          onClick={openAiStudio}
+          style={{ background: 'none', border: 'none', padding: 0, color: 'rgba(140,170,255,0.85)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          Obtener una API key gratis ↗
+        </button>
+        {status?.configured && status.source === 'local' && (
+          <button
+            onClick={() => void submitKey('')}
+            disabled={busy}
+            style={{ background: 'none', border: 'none', padding: 0, color: 'rgba(255,255,255,0.4)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            Quitar key
+          </button>
+        )}
+      </div>
+
+      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.35)', marginTop: 8, lineHeight: 1.5 }}>
+        Con Gemini activo, el chat entiende lenguaje natural y los documentos se
+        clasifican leyendo su contenido. Sin key, ARCA funciona 100% local como
+        siempre. La key se guarda solo en esta máquina.
+      </p>
+    </section>
+  )
+}
+
 // ── Settings panel ────────────────────────────────────────────────────────────
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
@@ -267,6 +410,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           })}
         </div>
       </section>
+
+      {/* Gemini / IA */}
+      <GeminiSection />
 
       {/* Shortcuts */}
       <section>

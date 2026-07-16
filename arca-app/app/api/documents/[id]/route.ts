@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getMode, deleteDocument, deleteDocumentAsync, updateDocument, updateDocumentAsync } from '@/lib/db'
+// deleteDocument/updateDocument handle team mode internally (they mark the
+// row synced=-1/0 and trigger the background sync) — no Async variant needed.
+import { deleteDocument, updateDocument } from '@/lib/db'
 import type { Document } from '@/lib/db'
 
 export async function DELETE(

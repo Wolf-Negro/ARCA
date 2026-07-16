@@ -57,7 +57,9 @@ const HELP_TEXT = `Comandos que entiendo:
 • **"cuántos"** / **"estadísticas"** → resumen
 • **"abre [nombre]"** → abrir archivo
 • **"copia el link de [nombre]"** → copiar link
-• **"ayuda"** → mostrar este mensaje`
+• **"ayuda"** → mostrar este mensaje
+
+Con Gemini activado (⚙ ajustes) también podés escribirme en lenguaje natural, p. ej. *"¿qué presupuestos tenemos del cliente Acme?"*`
 
 // Helper to call electronAPI if available, then web fallback
 async function openUrl(url: string) {
@@ -443,6 +445,45 @@ export function useChat(opts?: {
       addBotMsg(botMsg('Para editar, abre la biblioteca (di "ver todo") y usa el botón Editar en la tarjeta.'))
       setState(s => ({ ...s, isProcessing: false }))
       return
+    }
+
+    // ── Asistente IA (Gemini) — lenguaje natural ──────────────────────────
+    // Solo llega acá lo que ningún comando rápido reconoció. Si hay una key
+    // configurada, el servidor interpreta el mensaje y ejecuta la acción;
+    // handled:false (sin key, sin internet, error de Gemini) sigue con el
+    // pipeline local de siempre.
+    try {
+      addBotMsg(botMsg('Pensando...', 'loading'))
+      const aiRes = await fetch('/api/assistant', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ query: text }),
+      })
+      const ai = await aiRes.json()
+      if (ai.handled) {
+        if (ai.ui === 'help') {
+          replaceLastBotMsg(botMsg(HELP_TEXT))
+        } else if (ai.ui === 'stats') {
+          opts?.onShowStats?.()
+          replaceLastBotMsg(botMsg(ai.message ?? 'Abriendo...'))
+        } else if (ai.ui === 'library') {
+          opts?.onShowLibrary?.(ai.clientFilter, ai.docTypeFilter)
+          replaceLastBotMsg(botMsg(ai.message ?? 'Abriendo...'))
+        } else {
+          if (ai.openUrl) await openUrl(ai.openUrl)
+          replaceLastBotMsg(
+            ai.results?.length
+              ? botMsg(ai.message ?? '', 'result_card', { results: ai.results })
+              : botMsg(ai.message ?? 'Listo.')
+          )
+        }
+        setState((s) => ({ ...s, isProcessing: false }))
+        return
+      }
+      // No lo manejó la IA → quitar el "Pensando..." y seguir en local.
+      setState((s) => ({ ...s, messages: s.messages.filter((m) => m.type !== 'loading') }))
+    } catch {
+      setState((s) => ({ ...s, messages: s.messages.filter((m) => m.type !== 'loading') }))
     }
 
     // ── list by client ────────────────────────────────────────────────────

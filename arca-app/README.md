@@ -35,7 +35,7 @@ Todas son opcionales; sin ninguna, la app funciona 100% local. Copia `.env.local
 |---|---|
 | `ARCA_DB_PATH` | Ruta de la base SQLite (por defecto `./arca-data/arca.db`) |
 | `ARCA_ADMIN_SECRET` | Requerido para habilitar `/api/init-team` (configurar modo equipo / sync con Supabase) |
-| `ARCA_TEAMS_PATH` | Ruta alternativa para `teams.json` |
+| `GEMINI_API_KEY` | Activa las funciones de IA (chat en lenguaje natural, clasificación por contenido, OCR de imágenes). Alternativa: pegar la key en Ajustes ⚙ dentro de la app |
 
 ## Modo equipo (Supabase, opcional)
 

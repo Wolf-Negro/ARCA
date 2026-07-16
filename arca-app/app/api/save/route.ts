@@ -6,6 +6,8 @@ import {
   saveDocumentAsync,
   findDocumentByUrl,
   findDocumentByUrlAsync,
+  getStats,
+  getStatsAsync,
 } from '@/lib/db'
 import { extractTextFromFile, fetchUrlContent, UrlValidationError } from '@/lib/fileHandler'
 import type { OgMetadata } from '@/lib/fileHandler'
@@ -60,7 +62,16 @@ export async function POST(req: NextRequest) {
 
     void resolvedFileUrl
 
-    const metadata = await extractDocumentMetadata(rawContent, filename, url, clientName, og, mimeType)
+    // Known clients let Gemini assign an existing client from the content
+    // (it's forbidden from inventing new ones). Best-effort: an empty list
+    // just means the user gets asked, as before.
+    let knownClients: string[] = []
+    try {
+      const stats = getMode() === 'team' ? await getStatsAsync() : getStats()
+      knownClients = stats.byClient.map((c) => c.client_name)
+    } catch { /* ignore */ }
+
+    const metadata = await extractDocumentMetadata(rawContent, filename, url, clientName, og, mimeType, knownClients)
 
     if (!metadata.client_name && !clientName) {
       return NextResponse.json({ needsClient: true, partialMetadata: metadata })
