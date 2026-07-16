@@ -18,10 +18,16 @@ const PANEL_W       = 420           // panel width
 const PANEL_H       = 650           // panel height
 // ClipboardToast.tsx renders at width:340 + 16px padding each side + 1px
 // border each side (~374px) and needs ~140px of vertical content — 320x120
-// was clipping it on both axes. Sized with margin to spare.
-const TOAST_W       = 380
+// was clipping it on both axes. TOAST_W=380 stopped the clipping but left
+// only ~3px of window margin around the ~374px content on each side, which
+// combined with the shared 10px screen-edge margin looked glued to the
+// corner — TOAST_MARGIN below is deliberately larger and dedicated to the
+// toast alone, instead of reusing WIN_MARGIN (shared with orb/panel
+// snapping, where 10px is the right call).
+const TOAST_W       = 420
 const TOAST_H       = 170
-const WIN_MARGIN    = 10            // screen-edge margin
+const TOAST_MARGIN  = 20            // toast-to-screen-edge margin (breathing room around its ~374px content)
+const WIN_MARGIN    = 10            // screen-edge margin (orb / panel)
 const DEFAULT_PORT  = 3000
 let   NEXT_URL       = `http://localhost:${DEFAULT_PORT}`   // reassigned once the real port is known
 const INITIAL_DELAY = 5000          // ms — wait for Next.js to compile
@@ -649,8 +655,8 @@ function registerIPC() {
       }
 
       win.setMinimumSize(TOAST_W, TOAST_H)
-      const newX = dx + dw - TOAST_W - WIN_MARGIN
-      const newY = dy + dh - TOAST_H - WIN_MARGIN
+      const newX = dx + dw - TOAST_W - TOAST_MARGIN
+      const newY = dy + dh - TOAST_H - TOAST_MARGIN
       win.setBounds({ x: newX, y: newY, width: TOAST_W, height: TOAST_H }, false)
       win.show()
     } else {
