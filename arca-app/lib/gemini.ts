@@ -88,10 +88,19 @@ export async function geminiGenerate(parts: GeminiPart[], opts: GenerateOpts = {
 
 /** Live check used by /api/settings before persisting a key. */
 export async function validateGeminiKey(key: string): Promise<{ ok: boolean; error?: string }> {
+  // Gemini API keys start with "AIza". Anything else (OAuth codes, tokens
+  // copied from gemini.google.com or a URL) fails against the API with
+  // confusing status codes — catch it before the round-trip.
+  if (!/^AIza/.test(key)) {
+    return {
+      ok: false,
+      error: 'Eso no parece una API key de Gemini (empiezan con "AIza..."). Créala en aistudio.google.com/apikey con el enlace de abajo.',
+    }
+  }
   try {
     const res = await geminiRequest([{ text: 'Responde únicamente: ok' }], key, { timeoutMs: 10000 })
     if (res.ok) return { ok: true }
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
+    if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
       return { ok: false, error: 'La API key no es válida o no tiene permisos.' }
     }
     if (res.status === 429) {
