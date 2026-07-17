@@ -10,7 +10,14 @@ import { getMeta, setMeta } from './db'
 import { DOC_TYPES } from './types'
 import type { DocumentMetadata } from './types'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+// Aliases that always track Google's newest models — pinned versions
+// (e.g. gemini-2.5-flash) get retired for new API keys and start returning
+// 404, which is exactly what happened during the first field test. Tried in
+// order: when a model is saturated (503), rate-limited (429) or unavailable
+// (404), the next one takes over in the same request. Lite goes first: for
+// ARCA's classification/extraction tasks its quality is enough and, in field
+// testing, the full flash alias hung past the timeout under load spikes.
+const GEMINI_MODELS = ['gemini-flash-lite-latest', 'gemini-flash-latest']
 const API_BASE     = 'https://generativelanguage.googleapis.com/v1beta/models'
 const META_KEY     = 'gemini_api_key'
 
@@ -46,22 +53,39 @@ interface GenerateOpts {
   apiKey?:    string
 }
 
-async function geminiRequest(parts: GeminiPart[], key: string, opts: GenerateOpts): Promise<Response> {
+async function geminiRequestModel(model: string, parts: GeminiPart[], key: string, opts: GenerateOpts): Promise<Response> {
   const body: Record<string, unknown> = {
     contents: [{ role: 'user', parts }],
     generationConfig: {
       temperature: 0.2,
+      // The -latest aliases point at thinking models; reasoning adds 10s+ of
+      // latency that classification/extraction tasks don't need.
+      thinkingConfig: { thinkingBudget: 0 },
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
     },
   }
   if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] }
 
-  return fetch(`${API_BASE}/${GEMINI_MODEL}:generateContent`, {
+  return fetch(`${API_BASE}/${model}:generateContent`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body:    JSON.stringify(body),
     signal:  AbortSignal.timeout(opts.timeoutMs ?? 15000),
   })
+}
+
+// Statuses where trying the next model in the chain makes sense; anything
+// else (bad key, malformed request) would fail identically everywhere.
+const RETRYABLE = new Set([404, 429, 500, 503])
+
+async function geminiRequest(parts: GeminiPart[], key: string, opts: GenerateOpts): Promise<Response> {
+  let last: Response | null = null
+  for (const model of GEMINI_MODELS) {
+    const res = await geminiRequestModel(model, parts, key, opts)
+    if (res.ok || !RETRYABLE.has(res.status)) return res
+    last = res
+  }
+  return last as Response
 }
 
 function extractResponseText(data: unknown): string | null {
@@ -86,25 +110,24 @@ export async function geminiGenerate(parts: GeminiPart[], opts: GenerateOpts = {
   }
 }
 
-/** Live check used by /api/settings before persisting a key. */
+/** Live check used by /api/settings before persisting a key.
+ *  No format pre-check on purpose: Google issues keys with more than one
+ *  prefix (AIza..., AQ....), so the round-trip is the only reliable test. */
 export async function validateGeminiKey(key: string): Promise<{ ok: boolean; error?: string }> {
-  // Gemini API keys start with "AIza". Anything else (OAuth codes, tokens
-  // copied from gemini.google.com or a URL) fails against the API with
-  // confusing status codes — catch it before the round-trip.
-  if (!/^AIza/.test(key)) {
-    return {
-      ok: false,
-      error: 'Eso no parece una API key de Gemini (empiezan con "AIza..."). Créala en aistudio.google.com/apikey con el enlace de abajo.',
-    }
-  }
   try {
     const res = await geminiRequest([{ text: 'Responde únicamente: ok' }], key, { timeoutMs: 10000 })
     if (res.ok) return { ok: true }
-    if (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 404) {
-      return { ok: false, error: 'La API key no es válida o no tiene permisos.' }
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      return { ok: false, error: 'La API key no es válida o no tiene permisos. Créala en aistudio.google.com/apikey (enlace de abajo).' }
+    }
+    if (res.status === 404) {
+      return { ok: false, error: 'La key funciona pero el modelo no está disponible para tu cuenta. Actualiza ARCA a la última versión.' }
     }
     if (res.status === 429) {
-      return { ok: false, error: 'La key es válida pero está sin cuota disponible (429).' }
+      return { ok: false, error: 'La key es válida pero está sin cuota disponible en este momento (429).' }
+    }
+    if (res.status === 503) {
+      return { ok: false, error: 'Gemini está saturado en este momento. Espera un minuto y vuelve a intentar.' }
     }
     return { ok: false, error: `Gemini respondió con error ${res.status}. Intenta de nuevo.` }
   } catch {
@@ -117,7 +140,30 @@ function parseGeminiJson<T>(text: string): T | null {
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/```\s*$/, '')
     .trim()
-  try { return JSON.parse(cleaned) as T } catch { return null }
+  try { return JSON.parse(cleaned) as T } catch { /* salvage below */ }
+
+  // Even in JSON mode the model sometimes appends stray characters (seen in
+  // the field: a duplicated closing brace). Extract the first balanced
+  // object and parse just that.
+  const start = cleaned.indexOf('{')
+  if (start < 0) return null
+  let depth = 0, inStr = false, esc = false
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') inStr = false
+    } else if (ch === '"') { inStr = true }
+    else if (ch === '{') { depth++ }
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        try { return JSON.parse(cleaned.slice(start, i + 1)) as T } catch { return null }
+      }
+    }
+  }
+  return null
 }
 
 // ─── Metadata extraction ──────────────────────────────────────────────────────
