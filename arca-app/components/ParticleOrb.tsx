@@ -26,7 +26,6 @@ const CFG = {
   processing: { rgb: [240, 192,  96] as [number,number,number], orbit: 32, spd: 3.0, connAlpha: 0.25 },
   responding: { rgb: [83,   74, 183] as [number,number,number], orbit: 38, spd: 1.8, connAlpha: 0.20 },
   success:    { rgb: [29,  158, 117] as [number,number,number], orbit: 50, spd: 3.0, connAlpha: 0.30 },
-  clipboard:  { rgb: [0,   210, 255] as [number,number,number], orbit: 44, spd: 1.5, connAlpha: 0.35 },
 }
 
 // Ambient drop-shadow color per state (R, G, B)
@@ -36,7 +35,6 @@ const GLOW: Record<OrbState, [number, number, number]> = {
   processing: [240, 192,  96],
   responding: [120, 100, 220],
   success:    [29,  158, 117],
-  clipboard:  [0,   210, 255],
 }
 
 const N = 85
@@ -368,7 +366,6 @@ export function ParticleOrb({
     processing: 'Procesando...',
     responding: 'Respondiendo...',
     success:    '',
-    clipboard:  '🔗 Link copiado',
   }
 
   const isActive = state === 'listening' || state === 'processing' || state === 'responding'
