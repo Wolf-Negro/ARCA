@@ -33,14 +33,14 @@ export async function POST(req: NextRequest) {
         'apikey':        anonKey || supabaseKey,
         'Authorization': `Bearer ${supabaseKey}`,
       },
+      signal: AbortSignal.timeout(10000),
     })
 
-    if (testRes.status === 401) {
-      return NextResponse.json({ error: 'Clave incorrecta (401 Unauthorized)' }, { status: 400 })
-    }
-
-    if (testRes.status >= 500) {
-      return NextResponse.json({ error: `Error del servidor Supabase (${testRes.status})` }, { status: 400 })
+    // Anything non-2xx means team mode would be broken (401 bad key, 403
+    // RLS-rejected JWT, 404 not a Supabase REST URL...) — refuse to persist
+    // a config that can't read its own documents table.
+    if (!testRes.ok) {
+      return NextResponse.json({ error: `Supabase rechazó la conexión (${testRes.status})` }, { status: 400 })
     }
 
     // Configure the db module

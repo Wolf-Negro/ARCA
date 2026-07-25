@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import type { DocumentMetadata } from '@/lib/openai'
+import type { DocumentMetadata } from '@/lib/types'
 
 interface MetadataCardProps {
   metadata:  DocumentMetadata

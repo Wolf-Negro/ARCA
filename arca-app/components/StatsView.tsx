@@ -27,7 +27,15 @@ export function StatsView({ isOpen, onClose, onFilterLibrary }: StatsViewProps) 
     setError(null)
     fetch('/api/stats')
       .then((r) => r.json())
-      .then((data: StatsData) => setStats(data))
+      .then((data) => {
+        // An {error} payload stored as stats would crash the render on
+        // stats.byClient.length — validate the shape first.
+        if (data && Array.isArray(data.byClient) && Array.isArray(data.byType)) {
+          setStats(data as StatsData)
+        } else {
+          setError(data?.error ?? 'Error cargando estadísticas')
+        }
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error cargando estadísticas'))
       .finally(() => setLoading(false))
   }, [isOpen])

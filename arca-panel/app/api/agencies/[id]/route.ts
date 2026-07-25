@@ -14,7 +14,8 @@ export async function PATCH(
     const agency = await toggleAgency(id, active)
     return NextResponse.json(agency)
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[/api/agencies/:id PATCH]', err)
+    return NextResponse.json({ error: 'Error interno. Intenta de nuevo.' }, { status: 500 })
   }
 }
 
@@ -27,6 +28,7 @@ export async function DELETE(
     await deleteAgency(id)
     return NextResponse.json({ success: true })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[/api/agencies/:id DELETE]', err)
+    return NextResponse.json({ error: 'Error interno. Intenta de nuevo.' }, { status: 500 })
   }
 }

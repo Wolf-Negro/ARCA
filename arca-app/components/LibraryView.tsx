@@ -161,23 +161,28 @@ function DocCard({ doc, onDeleted, onUpdated, onPinToggled }: DocCardProps) {
   async function handleDelete() {
     setDeleting(true)
     try {
-      await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' })
-      onDeleted(doc.id)
-    } finally {
+      const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' })
+      // Only drop the card if the server actually deleted the row —
+      // otherwise it silently reappears on the next fetch.
+      if (res.ok) onDeleted(doc.id)
+    } catch { /* keep the card; nothing was deleted */ } finally {
       setDeleting(false)
       setConfirmDelete(false)
     }
   }
 
   async function handleEdit(updates: Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name'>>) {
-    const res = await fetch(`/api/documents/${doc.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    })
-    const updated = await res.json() as Document
-    onUpdated(updated)
-    setEditing(false)
+    try {
+      const res = await fetch(`/api/documents/${doc.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      const updated = await res.json()
+      if (!res.ok || updated.error || !updated.id) return // keep the form open
+      onUpdated(updated as Document)
+      setEditing(false)
+    } catch { /* keep the form open */ }
   }
 
   async function handleCopy() {
@@ -207,9 +212,13 @@ function DocCard({ doc, onDeleted, onUpdated, onPinToggled }: DocCardProps) {
   async function handlePinToggle() {
     setPinning(true)
     try {
-      const res = await fetch(`/api/documents/${doc.id}/pin`, { method: 'POST' })
-      const updated = await res.json() as Document
-      onPinToggled(updated)
+      const res = await fetch(`/api/documents/${doc.id}/pin`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ pinned: doc.pinned ? 0 : 1 }),
+      })
+      const updated = await res.json()
+      if (res.ok && updated.id) onPinToggled(updated as Document)
     } catch { /* ignore */ } finally {
       setPinning(false)
     }

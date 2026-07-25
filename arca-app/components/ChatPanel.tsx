@@ -514,8 +514,15 @@ export function ChatPanel({
     onShowStats,
   })
 
-  // Notify parent whenever isProcessing changes (drives orb state)
+  // Notify parent whenever isProcessing changes (drives orb state).
+  // Skip the mount run: firing with the initial `false` makes the orb play
+  // its 2.2s "responding" animation on app startup for no reason.
+  const processingMountRef = useRef(true)
   useEffect(() => {
+    if (processingMountRef.current) {
+      processingMountRef.current = false
+      return
+    }
     onProcessingChange?.(isProcessing)
   }, [isProcessing]) // eslint-disable-line
 

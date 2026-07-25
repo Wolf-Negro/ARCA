@@ -69,7 +69,15 @@ export function runBackup(): void {
         } catch {
           // ignore
         }
-        rotateBackups()
+        // A throw here (e.g. statSync ENOENT inside rotateBackups on a file
+        // deleted concurrently) would reject this promise with no handler
+        // attached → unhandledRejection → process crash. Backups are
+        // best-effort; swallow it.
+        try {
+          rotateBackups()
+        } catch {
+          // ignore
+        }
       })
   } catch {
     // Could not open DB via better-sqlite3 (e.g. locked) — fall back to a

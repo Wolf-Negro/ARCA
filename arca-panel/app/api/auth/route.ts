@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     })
     return res
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[/api/auth]', err)
+    return NextResponse.json({ error: 'Error interno. Intenta de nuevo.' }, { status: 500 })
   }
 }

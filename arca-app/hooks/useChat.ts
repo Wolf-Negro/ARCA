@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react'
 import { v4 as uuidv4 } from 'uuid'
-import type { DocumentMetadata } from '@/lib/openai'
+import type { DocumentMetadata } from '@/lib/types'
 import type { Document } from '@/lib/db'
 
 export type MessageType = 'text' | 'metadata_card' | 'result_card' | 'loading'
@@ -161,6 +161,17 @@ export function useChat(opts?: {
           awaitingClient:  false,
         }))
         opts?.onDocSaved?.()
+      } else if (data.duplicate) {
+        // The doc appeared between proposal and confirmation (e.g. team
+        // sync) — clear the pending state or retrying loops forever.
+        replaceLastBotMsg(botMsg(`Ese link ya estaba guardado como "${data.existingDocument?.file_name ?? 'otro documento'}".`))
+        setState((s) => ({
+          ...s,
+          isProcessing:    false,
+          pendingMetadata: null,
+          pendingFileData: null,
+          awaitingClient:  false,
+        }))
       } else {
         replaceLastBotMsg(botMsg(`Error al guardar: ${data.error ?? 'intenta de nuevo'}`))
         setState((s) => ({ ...s, isProcessing: false }))
@@ -357,7 +368,7 @@ export function useChat(opts?: {
         body:    JSON.stringify({ query }),
       })
       const data = await res.json()
-      if (data.results?.length && data.results[0].file_url) {
+      if (data.results?.length === 1 && data.results[0].file_url) {
         const doc = data.results[0]
         await copyUrl(doc.file_url)
         addBotMsg(
@@ -561,8 +572,10 @@ export function useChat(opts?: {
         return
       }
 
-      // ── Pure text command: no loading state, no spinner ──────────────────
-      setState((s) => ({ ...s, messages: [...s.messages, userMsg] }))
+      // ── Pure text command: no loading bubble, but isProcessing must be
+      // set — it's what blocks a second send while this one is in flight
+      // (a concurrent command would cross-wire the loading replacements).
+      setState((s) => ({ ...s, messages: [...s.messages, userMsg], isProcessing: true }))
       await handleTextCommand(text, false)
     } catch {
       replaceLastBotMsg(botMsg('Algo salió mal. Intenta de nuevo.'))
@@ -577,6 +590,12 @@ export function useChat(opts?: {
   const handleFile = useCallback(async (file: File) => {
     const reader = new FileReader()
     reader.readAsDataURL(file)
+    reader.onerror = () => {
+      setState((s) => ({
+        ...s,
+        messages: [...s.messages, botMsg('No pude leer ese archivo. Intenta de nuevo.')],
+      }))
+    }
     reader.onload = async () => {
       const base64 = (reader.result as string).split(',')[1]
 
@@ -587,12 +606,19 @@ export function useChat(opts?: {
       }))
 
       try {
-        const uploadRes = await fetch('/api/upload', {
+        const uploadRes  = await fetch('/api/upload', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ base64, filename: file.name, mimeType: file.type }),
         })
-        const { url: fileUrl } = await uploadRes.json()
+        const uploadData = await uploadRes.json()
+        if (!uploadRes.ok || uploadData.error || !uploadData.url) {
+          replaceLastBotMsg(botMsg(`No pude subir el archivo: ${uploadData.error ?? 'intenta de nuevo'}`))
+          setState((s) => ({ ...s, isProcessing: false }))
+          opts?.onProcessingChange?.(false)
+          return
+        }
+        const fileUrl = uploadData.url
 
         const res  = await fetch('/api/save', {
           method:  'POST',
@@ -601,12 +627,19 @@ export function useChat(opts?: {
         })
         const data = await res.json()
 
+        if (!res.ok || data.error) {
+          replaceLastBotMsg(botMsg(`No pude procesar el archivo: ${data.error ?? 'intenta de nuevo'}`))
+          setState((s) => ({ ...s, isProcessing: false }))
+          opts?.onProcessingChange?.(false)
+          return
+        }
+
         if (data.needsClient) {
           setState((s) => ({
             ...s,
             isProcessing:    false,
             pendingMetadata: data.partialMetadata,
-            pendingFileData: { fileUrl, mimeType: file.type, filename: file.name, base64 },
+            pendingFileData: { fileUrl, mimeType: file.type, filename: file.name, base64, rawContent: data.rawContent ?? '' },
             awaitingClient:  true,
           }))
           replaceLastBotMsg(botMsg('¿A qué cliente pertenece este archivo?'))
@@ -619,7 +652,7 @@ export function useChat(opts?: {
             ...s,
             isProcessing:    false,
             pendingMetadata: data.proposedMetadata,
-            pendingFileData: { fileUrl, mimeType: file.type, filename: file.name, base64 },
+            pendingFileData: { fileUrl, mimeType: file.type, filename: file.name, base64, rawContent: data.rawContent ?? '' },
           }))
           replaceLastBotMsg(
             botMsg('¿Todo bien o cambiamos algo?', 'metadata_card', { metadata: data.proposedMetadata })
@@ -628,10 +661,9 @@ export function useChat(opts?: {
           return
         }
 
-        replaceLastBotMsg(botMsg('Listo, guardado ✓'))
+        replaceLastBotMsg(botMsg(`No pude procesar el archivo: respuesta inesperada del servidor.`))
         setState((s) => ({ ...s, isProcessing: false }))
         opts?.onProcessingChange?.(false)
-        opts?.onDocSaved?.()
       } catch {
         replaceLastBotMsg(botMsg('Algo salió mal con el archivo. Intenta de nuevo.'))
         setState((s) => ({ ...s, isProcessing: false }))

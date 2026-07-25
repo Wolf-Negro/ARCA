@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, globalShortcut,
-  screen, ipcMain, shell, session, clipboard,
+  screen, ipcMain, shell, session, clipboard, dialog,
 } = require('electron')
 const path   = require('path')
 const fs     = require('fs')
@@ -209,7 +209,9 @@ function spawnServer(port) {
   // Dev: run the arca-app source directly with the local `next` binary.
   const arcaAppDir = path.join(__dirname, '..', 'arca-app')
   const nextBin     = path.join(arcaAppDir, 'node_modules', '.bin', process.platform === 'win32' ? 'next.cmd' : 'next')
-  return spawn(nextBin, ['dev', '-p', String(port)], {
+  // -H keeps dev loopback-only, matching arca-app's own scripts — without it
+  // `next dev` binds 0.0.0.0 and exposes the server to the local network.
+  return spawn(nextBin, ['dev', '-p', String(port), '-H', '127.0.0.1'], {
     cwd:      arcaAppDir,
     env,
     stdio,
@@ -340,6 +342,7 @@ function createWindow(savedBounds = null) {
       preload:              path.join(__dirname, 'preload.js'),
       contextIsolation:     true,
       nodeIntegration:      false,
+      sandbox:              true,
       backgroundThrottling: false,
     },
   })
@@ -362,6 +365,10 @@ function createWindow(savedBounds = null) {
     const winH = 150
     const centerX = Math.round(workX + (workW - winW) / 2)
     const centerY = Math.round(workY + (workH - winH) / 2)
+    // The constructor's minWidth/minHeight (380x500, for panel mode) would
+    // silently clamp this setSize — drop the minimum first, exactly like
+    // panel-toggle does on every later resize.
+    win.setMinimumSize(winW, winH)
     win.setSize(winW, winH)
     win.setPosition(centerX, centerY)
     win.show()
@@ -445,7 +452,14 @@ function createOnboardingWindow() {
   })
   onboardingWin.loadFile(path.join(__dirname, 'onboarding.html'))
   onboardingWin.once('ready-to-show', () => onboardingWin?.show())
-  onboardingWin.once('closed', () => { onboardingWin = null })
+  onboardingWin.once('closed', () => {
+    onboardingWin = null
+    // Closed without completing onboarding (Alt+F4): at this point there is
+    // no main window, no tray and no shortcuts — window-all-closed is
+    // preventDefault'ed, so without this the process would linger invisibly
+    // with no way to reach it short of the task manager.
+    if (!win) app.quit()
+  })
   return onboardingWin
 }
 
@@ -510,8 +524,11 @@ function registerIPC() {
   })
 
   // ── Manual window drag ────────────────────────────────────────────────────
-  ipcMain.on('move-window', (_event, { x, y }) => {
+  ipcMain.on('move-window', (_event, payload) => {
     if (!win) return
+    if (!payload || typeof payload.x !== 'number' || typeof payload.y !== 'number' ||
+        !Number.isFinite(payload.x) || !Number.isFinite(payload.y)) return
+    const { x, y } = payload
     if (x === 0 && y === 0) { dragLastX = null; dragLastY = null; return }
     if (dragLastX === null) { dragLastX = x; dragLastY = y; return }
     const [wx, wy] = win.getPosition()
@@ -590,9 +607,11 @@ function registerIPC() {
       // Lower minimum size before shrinking back to orb dimensions
       win.setMinimumSize(ORB_SIZE, ORB_SIZE)
 
-      // Restore exact orb position from before the panel opened
-      const x = savedOrbX ?? (dx + dw - ORB_SIZE - WIN_MARGIN)
-      const y = savedOrbY ?? (dy + dh - ORB_SIZE - WIN_MARGIN)
+      // Restore exact orb position from before the panel opened — unless
+      // that spot no longer exists (monitor unplugged mid-session).
+      const hasSaved = savedOrbX !== null && isOnScreen(savedOrbX, savedOrbY, ORB_SIZE, ORB_SIZE)
+      const x = hasSaved ? savedOrbX : (dx + dw - ORB_SIZE - WIN_MARGIN)
+      const y = hasSaved ? savedOrbY : (dy + dh - ORB_SIZE - WIN_MARGIN)
       savedOrbX = null
       savedOrbY = null
       win.setBounds({ x, y, width: ORB_SIZE, height: ORB_SIZE }, false)
@@ -621,8 +640,9 @@ function registerIPC() {
       win.focus()
     } else {
       win.setMinimumSize(ORB_SIZE, ORB_SIZE)
-      const x = savedOrbX ?? (dx + dw - ORB_SIZE - WIN_MARGIN)
-      const y = savedOrbY ?? (dy + dh - ORB_SIZE - WIN_MARGIN)
+      const hasSaved = savedOrbX !== null && isOnScreen(savedOrbX, savedOrbY, ORB_SIZE, ORB_SIZE)
+      const x = hasSaved ? savedOrbX : (dx + dw - ORB_SIZE - WIN_MARGIN)
+      const y = hasSaved ? savedOrbY : (dy + dh - ORB_SIZE - WIN_MARGIN)
       savedOrbX = null
       savedOrbY = null
       win.setBounds({ x, y, width: ORB_SIZE, height: ORB_SIZE }, false)
@@ -661,12 +681,6 @@ function registerIPC() {
     win = createWindow(null)
     tray = createTray(win)
     registerShortcuts()
-  })
-
-  ipcMain.on('reset-onboarding', () => {
-    try { fs.unlinkSync(configFile()) } catch {}
-    if (win && !win.isDestroyed()) win.close()
-    onboardingWin = createOnboardingWindow()
   })
 
   ipcMain.handle('get-config', () => {
@@ -730,10 +744,22 @@ app.whenReady().then(async () => {
 
   // Start arca-app's own server before loading any window into it, retrying
   // on the next port if one is already taken by another local project.
-  const port = await startNextServer(DEFAULT_PORT).catch((err) => {
+  let port
+  try {
+    port = await startNextServer(DEFAULT_PORT)
+  } catch (err) {
+    // No port worked (e.g. node.exe missing/quarantined). Continuing here
+    // would either leave a zombie empty window or — worse — load whatever
+    // foreign app owns port 3000 inside our window WITH our preload (which
+    // hands out ADMIN_SECRET via getConfig). Fail loudly and exit instead.
     console.error('[ARCA] Could not start bundled server:', err)
-    return DEFAULT_PORT
-  })
+    dialog.showErrorBox(
+      'ARCA no pudo iniciar',
+      'El servidor interno no pudo arrancar. Reinstala ARCA o revisa que el antivirus no esté bloqueando la aplicación.'
+    )
+    app.exit(1)
+    return
+  }
   NEXT_URL = `http://localhost:${port}`
 
   const config = loadConfig()

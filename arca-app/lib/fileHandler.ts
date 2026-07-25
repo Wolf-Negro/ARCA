@@ -160,14 +160,19 @@ const BLOCKED_HOSTNAME = [
   /^192\.168\./,
   /^169\.254\./,           // link-local + AWS/GCP/Azure metadata
   /^::1$/,
-  /^fc00:/i,
+  /^(0+:){7}0*1$/,         // uncompressed IPv6 loopback (0:0:0:0:0:0:0:1)
+  /^::$/,                  // unspecified
+  /^::ffff:/i,             // IPv4-mapped IPv6 (::ffff:127.0.0.1 etc.)
+  /^f[cd][0-9a-f]{2}:/i,   // unique-local fc00::/7 (fcXX: and the common fdXX:)
   /^fe80:/i,
   /\.internal$/i,
   /\.local$/i,
 ]
 
 function isBlockedAddress(value: string): boolean {
-  return BLOCKED_HOSTNAME.some(r => r.test(value))
+  // URL.hostname wraps IPv6 literals in brackets — strip before matching.
+  const bare = value.replace(/^\[|\]$/g, '')
+  return BLOCKED_HOSTNAME.some(r => r.test(bare))
 }
 
 // Validates that a URL is safe to fetch server-side: rejects hostnames that are
@@ -206,19 +211,33 @@ export async function fetchUrlContent(url: string): Promise<FetchedUrlResult> {
     return { text: '', og: {} }
   }
 
-  // Single GET — handles 404, auth redirects, and timeouts in one round-trip
+  // Single GET — handles 404, auth redirects, and timeouts in one round-trip.
+  // Redirects are followed MANUALLY so every hop goes through assertSafeUrl:
+  // with redirect:'follow', a public URL answering "302 → http://127.0.0.1/…"
+  // or "302 → http://169.254.169.254/…" would bypass the SSRF check entirely.
   try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 ARCA-Bot/1.0' },
-      signal:  AbortSignal.timeout(4000),
-    })
+    let currentUrl = url
+    let res: Response
+    for (let hop = 0; ; hop++) {
+      res = await fetch(currentUrl, {
+        headers:  { 'User-Agent': 'Mozilla/5.0 ARCA-Bot/1.0' },
+        redirect: 'manual',
+        signal:   AbortSignal.timeout(4000),
+      })
+      const location = res.headers.get('location')
+      if (res.status < 300 || res.status >= 400 || !location) break
+      if (hop >= 5) return { text: '', og: {} }
+      currentUrl = new URL(location, currentUrl).toString()
+      if (!/^https?:$/.test(new URL(currentUrl).protocol)) return { text: '', og: {} }
+      await assertSafeUrl(currentUrl)
+    }
 
     if (res.status === 404) throw new UrlValidationError('La URL no existe (404)')
 
     // 401/403 or redirect to login → private URL, save without content
     const redirectedToLogin =
-      res.url !== url &&
-      /\/(login|signin)/i.test(new URL(res.url).pathname)
+      currentUrl !== url &&
+      /\/(login|signin)/i.test(new URL(currentUrl).pathname)
     if (res.status === 401 || res.status === 403 || redirectedToLogin) {
       return { text: '', og: {} }
     }

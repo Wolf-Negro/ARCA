@@ -29,6 +29,9 @@ export function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
   useEffect(() => {
     if (!query.trim()) {
       setResults([])
+      // Clearing the query cancels the pending debounce below — reset the
+      // spinner too or it spins forever after a type-then-erase.
+      setLoading(false)
       return
     }
     setLoading(true)

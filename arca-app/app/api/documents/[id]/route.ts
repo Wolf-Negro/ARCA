@@ -16,9 +16,29 @@ export async function DELETE(
     deleteDocument(params.id)
     return NextResponse.json({ success: true })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Error desconocido'
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[/api/documents/:id DELETE]', err)
+    return NextResponse.json({ error: 'No se pudo eliminar el documento' }, { status: 500 })
   }
+}
+
+type Updates = Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name' | 'pinned'>>
+
+// Whitelist + type-check each field: a raw body passed straight to
+// better-sqlite3 turns wrong-typed values into binding TypeErrors (500) or,
+// worse, silently corrupts tags (a string survives JSON round-trip).
+function sanitizeUpdates(body: unknown): Updates | null {
+  if (!body || typeof body !== 'object') return null
+  const b = body as Record<string, unknown>
+  const out: Updates = {}
+
+  if (typeof b.client_name === 'string' || b.client_name === null) out.client_name = b.client_name as string | null
+  if (typeof b.doc_type    === 'string' && b.doc_type.trim())      out.doc_type    = b.doc_type
+  if (typeof b.description === 'string')                           out.description = b.description
+  if (typeof b.file_name   === 'string' && b.file_name.trim())     out.file_name   = b.file_name
+  if (b.pinned === 0 || b.pinned === 1)                            out.pinned      = b.pinned
+  if (Array.isArray(b.tags) && b.tags.every((t) => typeof t === 'string')) out.tags = b.tags as string[]
+
+  return Object.keys(out).length ? out : null
 }
 
 export async function PATCH(
@@ -30,11 +50,14 @@ export async function PATCH(
   }
 
   try {
-    const body = await req.json() as Partial<Pick<Document, 'client_name' | 'doc_type' | 'description' | 'tags' | 'file_name' | 'pinned'>>
-    const updated = updateDocument(params.id, body)
+    const updates = sanitizeUpdates(await req.json().catch(() => null))
+    if (!updates) {
+      return NextResponse.json({ error: 'Sin campos válidos para actualizar' }, { status: 400 })
+    }
+    const updated = updateDocument(params.id, updates)
     return NextResponse.json(updated)
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Error desconocido'
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error('[/api/documents/:id PATCH]', err)
+    return NextResponse.json({ error: 'No se pudo actualizar el documento' }, { status: 500 })
   }
 }

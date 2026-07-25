@@ -21,7 +21,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (!process.env.SUPABASE_JWT_SECRET) {
-      return NextResponse.json({ error: 'Servidor no configurado (falta SUPABASE_JWT_SECRET)' }, { status: 500 })
+      console.error('[/api/activate] SUPABASE_JWT_SECRET no está configurado')
+      return NextResponse.json({ error: 'Servidor no configurado' }, { status: 500 })
     }
 
     // A JWT scoped to this agency's team_id replaces handing out the shared
@@ -40,6 +41,9 @@ export async function POST(req: NextRequest) {
       anonKey:     process.env.SUPABASE_ANON_KEY,   // solo para el header apikey
     })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    // Never echo internals (env var names, PostgREST bodies) on this
+    // PUBLIC route — log server-side, answer generic.
+    console.error('[/api/activate]', err)
+    return NextResponse.json({ error: 'Error interno. Intenta de nuevo.' }, { status: 500 })
   }
 }

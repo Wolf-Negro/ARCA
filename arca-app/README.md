@@ -1,12 +1,11 @@
 # ARCA — Asistente de Archivos para Agencias
 
-App local (Next.js) que funciona como asistente inteligente de archivos para equipos de agencias de marketing. Guarda y busca documentos con voz, texto o drag & drop. Se ejecuta embebida dentro de **arca-desktop** (Electron), en `http://127.0.0.1:3000`.
+App local (Next.js) que funciona como asistente inteligente de archivos para equipos de agencias de marketing. Guarda y busca documentos con texto o drag & drop. Se ejecuta embebida dentro de **arca-desktop** (Electron), en `http://127.0.0.1:3000`.
 
 ## Características
 
 - **Orb flotante** — botón inteligente siempre accesible (vía arca-desktop)
-- **Chat con IA** — guarda y busca archivos en lenguaje natural, sin depender de un LLM (reglas + metadata)
-- **Voz** — Web Speech API en español, sin dependencias externas
+- **Chat inteligente** — guarda y busca archivos por comandos de texto (reglas + metadata); con una API key de Gemini (opcional, pantalla de ajustes) entiende lenguaje natural y clasifica documentos leyendo su contenido
 - **Drag & drop** — arrastra archivos directamente a la ventana
 - **Búsqueda** por texto sobre metadatos (fuzzy substring)
 - **Datos 100% locales** — SQLite (`better-sqlite3`) en `arca-data/arca.db`, sin cuenta ni configuración previa

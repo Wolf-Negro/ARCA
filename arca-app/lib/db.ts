@@ -319,9 +319,17 @@ function normalizeUrl(url: string): string {
   }
 }
 
+function stripAccents(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+// Accent-insensitive on BOTH sides: /api/search normalizes the incoming
+// query, so document fields must be normalized too or "presentacion" would
+// never match a doc containing "presentación".
 function textMatches(doc: Document, q: string): boolean {
+  const needle = stripAccents(q.toLowerCase())
   return [doc.file_name, doc.client_name, doc.description, doc.file_url, ...doc.tags]
-    .some(f => f?.toLowerCase().includes(q))
+    .some(f => f && stripAccents(f.toLowerCase()).includes(needle))
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -379,6 +387,12 @@ export function findDocumentByUrl(url: string): Document | null {
   const candidates = new Set([url, normalizeUrl(url)])
   const docs = Array.from(loadCache().values())
   return docs.find(d => d.file_url && (candidates.has(d.file_url) || candidates.has(normalizeUrl(d.file_url)))) ?? null
+}
+
+export function getDocumentById(id: string): Document | null {
+  getDb()
+  const row = stmtSelectById.get(id)
+  return row ? rowToDoc(row) : null
 }
 
 export function searchDocuments(
@@ -593,7 +607,9 @@ export async function searchDocumentsAsync(
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (query) {
     const q = encodeURIComponent(`*${query}*`)
-    path += `&or=(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q})`
+    // Same fields the local textMatches() searches — tags (JSON text) and
+    // file_url included so both modes return consistent results.
+    path += `&or=(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q},tags.ilike.${q},file_url.ilike.${q})`
   }
   const res = await fetch(supabaseUrl(path), { headers: supabaseHeaders() })
   if (!res.ok) return []
@@ -872,6 +888,10 @@ export async function pullSupabaseChanges(): Promise<void> {
           }
 
           if (row.deleted === true) {
+            // A teammate deleted this doc — if its uploaded file lives on
+            // this machine, remove it too so it doesn't become an orphan.
+            const localRow = getDb().prepare(`SELECT file_url FROM documents WHERE id = ?`).get(row.id) as { file_url: string | null } | undefined
+            if (localRow) deleteLocalFileIfOwned(localRow.file_url)
             getDb().prepare(`DELETE FROM documents WHERE id = ?`).run(row.id)
             continue
           }

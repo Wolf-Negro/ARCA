@@ -24,9 +24,7 @@ npm run lint     # ESLint
 ### arca-desktop
 ```bash
 npm start        # Launch Electron (requires arca-app running on :3000)
-npm run build:win   # Windows NSIS installer
-npm run build:mac   # macOS DMG
-npm run build:linux # Linux AppImage
+npm run build:win   # Windows NSIS installer (the only packaging target — mac/linux were removed)
 ```
 
 ### arca-panel
@@ -44,7 +42,7 @@ Data lives in a local SQLite database (via `better-sqlite3`, WAL mode):
 - **Path**: `./arca-data/arca.db` (overridable via `ARCA_DB_PATH` env var)
 - **Uploads**: `./arca-data/uploads/` — files stored locally, referenced as `file://` URLs
 - **`lib/db.ts`** — wraps the SQLite connection; also implements an optional **team mode** that syncs documents to a Supabase project (`app/api/init-team/route.ts` configures `supabaseUrl`/`supabaseKey`/`teamId`, protected by the `ARCA_ADMIN_SECRET` header). Team mode is opt-in; local SQLite is the default and requires no cloud config. Also exposes `getMeta`/`setMeta` (key/value `meta` table) used for sync bookkeeping and the Gemini API key.
-- **`lib/openai.ts`** — legacy shim that re-exports from `lib/metadata.ts` (no OpenAI calls anywhere)
+- **`lib/types.ts`** — `DocumentMetadata` + the canonical `DOC_TYPES` closed set (the old `lib/openai.ts` shim was deleted; no OpenAI anywhere)
 
 **arca-app has no required environment variables** for local-only use. `ARCA_DB_PATH` and `GEMINI_API_KEY` are optional. `ARCA_ADMIN_SECRET` is required only to enable the `/api/init-team` endpoint (team/Supabase sync mode).
 
@@ -84,7 +82,7 @@ Data lives in a local SQLite database (via `better-sqlite3`, WAL mode):
 
 ### arca-app: Security
 
-- **`middleware.ts`** (root) — defense against drive-by-localhost / DNS-rebinding attacks: rejects (403) any mutating request (POST/PATCH/PUT/DELETE) to `/api/:path*` whose `Origin` header is present but isn't `http://localhost:3000` or `http://127.0.0.1:3000`. Requests with no `Origin` header (same-origin fetches from Electron) pass through — there is no user-login system, this is the whole authorization layer for document mutations.
+- **`middleware.ts`** (root) — defense against drive-by-localhost / DNS-rebinding attacks on `/api/:path*`. Two checks: (1) the `Host` header's hostname must be `localhost`/`127.0.0.1`/`[::1]` for EVERY method (a foreign Host on a loopback server can only mean DNS rebinding — comparing Origin against the request's own Host would pass under rebinding, since both carry the attacker's domain); (2) mutating requests (POST/PATCH/PUT/DELETE) with an `Origin` header must have a local origin hostname too. Ports are deliberately not pinned (arca-desktop probes 3000, 3001, … at startup). Requests with no `Origin` header (same-origin fetches from Electron) pass — there is no user-login system, this is the whole authorization layer for document mutations.
 - `dev`/`start` scripts bind to `-H 127.0.0.1` (loopback only, not `0.0.0.0`).
 - `/api/init-team` is the one endpoint that reconfigures where data syncs to, so it's gated separately by `ARCA_ADMIN_SECRET` (see API table above).
 
@@ -116,12 +114,16 @@ Data lives in a local SQLite database (via `better-sqlite3`, WAL mode):
 | `snap-to-edge` | app → main | Cubic ease-out snap animation to nearest screen edge |
 | `activate-voice` | main → app | Sent on `Ctrl+Shift+V` global shortcut — opens the panel |
 | `doc-saved` | app → main | Updates tray tooltip to show save confirmation |
-| `open-auth` | app → main | Opens a sandboxed Google OAuth popup window |
+| `spotlight-toggle` | both ways | `Alt+Space` opens/closes the centered spotlight window (main resizes; app renders) |
+| `copy-clipboard` | app → main | Copies text to the system clipboard |
+| `get-config` | app → main | Returns `arca-config.json` + the per-session `ADMIN_SECRET` (IPC-only, never written to disk) |
+| `onboarding-complete` | onboarding → main | Persists config, closes onboarding, creates the main window |
+| `hide-window` | app → main | Hides the floating window |
 | `open-external` | app → main | Opens URLs in system browser via `shell.openExternal` |
 
 Global shortcuts: `Ctrl+Space` (toggle panel), `Ctrl+Shift+V` (open panel), `Alt+Space` (spotlight search).
 
-The desktop app has an onboarding flow: if no `arca-config.json` exists in userData, it shows `onboarding.html` first, in its own `BrowserWindow` with `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true` (like every other window) backed by `preload-onboarding.js`. That preload exposes only `sendOnboardingComplete`, `openExternal`, and `verifySupabase` (the Supabase credential check happens in the main process via `ipcMain.handle('verify-supabase', ...)`, not via `require('https')` in the renderer). The config is saved via `ipcMain.on('onboarding-complete')`.
+The desktop app has an onboarding flow: if no `arca-config.json` exists in userData, it shows `onboarding.html` first, in its own `BrowserWindow` with `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true` (like every other window) backed by `preload-onboarding.js`. That preload exposes only `sendOnboardingComplete` and `openExternal`; team activation calls the arca-panel `/api/activate` endpoint directly from the onboarding renderer (there is no `verify-supabase` IPC anymore). The config is saved via `ipcMain.on('onboarding-complete')`. Closing the onboarding window without completing it quits the app (there's no tray yet at that point).
 
 Auto-update: `electron-updater` calls `autoUpdater.checkForUpdatesAndNotify()` on `app.whenReady()` (best-effort, wrapped so a failed check never blocks startup), publishing to GitHub Releases (`build.publish` in `package.json`, `Wolf-Negro/ARCA`). Code signing is **not configured** — installers are unsigned until real certificates (Windows EV/OV, macOS Developer ID + notarization) are added.
 

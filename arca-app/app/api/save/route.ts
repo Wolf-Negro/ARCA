@@ -3,7 +3,6 @@ import { extractDocumentMetadata } from '@/lib/metadata'
 import {
   getMode,
   saveDocument,
-  saveDocumentAsync,
   findDocumentByUrl,
   findDocumentByUrlAsync,
   getStats,
@@ -35,10 +34,13 @@ export async function POST(req: NextRequest) {
         if (existing) return NextResponse.json({ duplicate: true, existingDocument: existing })
       }
 
+      // Local-first in BOTH modes: saveDocument already handles team mode
+      // (marks synced=0, sets team_id, kicks triggerBackgroundSync). Writing
+      // straight to Supabase (saveDocumentAsync) would strip the local
+      // file:// link forever (remote rows carry file_url=null) and leave a
+      // window where edit/delete can't find the row locally.
       const rawContent = body.rawContent ?? ''
-      const doc = getMode() === 'team'
-        ? await saveDocumentAsync(confirmedMetadata, resolvedUrl ?? undefined, mimeType, rawContent)
-        : saveDocument(confirmedMetadata, resolvedUrl ?? undefined, mimeType, rawContent)
+      const doc = saveDocument(confirmedMetadata, resolvedUrl ?? undefined, mimeType, rawContent)
       return NextResponse.json({ saved: true, document: doc })
     }
 
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
     const metadata = await extractDocumentMetadata(rawContent, filename, url, clientName, og, mimeType, knownClients)
 
     if (!metadata.client_name && !clientName) {
-      return NextResponse.json({ needsClient: true, partialMetadata: metadata })
+      return NextResponse.json({ needsClient: true, partialMetadata: metadata, rawContent })
     }
     if (clientName && !metadata.client_name) metadata.client_name = clientName
 
@@ -84,7 +86,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: err.message }, { status: 422 })
     }
     console.error('[/api/save]', err)
-    const message = err instanceof Error ? err.message : 'Error desconocido'
-    return NextResponse.json({ error: `Error al procesar: ${message}` }, { status: 500 })
+    return NextResponse.json({ error: 'Error al procesar el documento. Intenta de nuevo.' }, { status: 500 })
   }
 }
