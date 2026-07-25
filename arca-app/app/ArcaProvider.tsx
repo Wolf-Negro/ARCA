@@ -7,7 +7,6 @@ import { DropZone } from '@/components/DropZone'
 import { LibraryView } from '@/components/LibraryView'
 import { StatsView } from '@/components/StatsView'
 import { SpotlightSearch } from '@/components/SpotlightSearch'
-import { ClipboardToast } from '@/components/ClipboardToast'
 import { useDrop } from '@/hooks/useDrop'
 import { useTheme, ThemeProvider } from '@/hooks/useTheme'
 
@@ -16,12 +15,9 @@ declare global {
     electronAPI?: {
       onActivateVoice:       (cb: () => void) => void
       offActivateVoice:      () => void
-      onClipboardDetected:   (cb: (url: string) => void) => void
-      offClipboardDetected:  () => void
       onSpotlightToggle:     (cb: (isOpen: boolean) => void) => void
       offSpotlightToggle:    () => void
       spotlightToggle:       (open: boolean) => void
-      toastToggle:           (open: boolean) => void
       notifyDocSaved:        () => void
       openExternal?:         (url: string) => Promise<void>
       copyToClipboard?:      (text: string) => Promise<void>
@@ -58,10 +54,6 @@ function ArcaProviderInner({ children }: { children: React.ReactNode }) {
 
   // ── Spotlight state ──────────────────────────────────────────────────────────
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false)
-
-  // ── Clipboard toast state ────────────────────────────────────────────────────
-  const [clipboardUrl,        setClipboardUrl]        = useState<string | null>(null)
-  const [pendingClipboardUrl, setPendingClipboardUrl] = useState<string | null>(null)
 
   const [arcaConfig, setArcaConfig] = useState<{
     mode: 'personal' | 'team'
@@ -177,41 +169,6 @@ function ArcaProviderInner({ children }: { children: React.ReactNode }) {
     window.electronAPI?.spotlightToggle?.(false)
   }, [])
 
-  // ── Electron: clipboard-detected → show toast ────────────────────────────────
-  useEffect(() => {
-    const api = window.electronAPI
-    if (!api) return
-    api.onClipboardDetected((url: string) => {
-      setPendingClipboardUrl(url)
-      setClipboardUrl(url)
-      setOrbFor('clipboard', 8000, 'idle')
-      // Resize window to show toast
-      api.toastToggle?.(true)
-    })
-    return () => api.offClipboardDetected()
-  }, [])
-
-  const handleClipboardSave = useCallback(async () => {
-    const url = pendingClipboardUrl
-    if (!url) return
-    setClipboardUrl(null)
-    setPendingClipboardUrl(null)
-    window.electronAPI?.toastToggle?.(false)
-    // Open the chat panel and pre-fill with the URL
-    setIsOpen(true)
-    // Give panel a beat to mount, then send the URL as a chat message via a custom event
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('arca:send-url', { detail: url }))
-    }, 200)
-  }, [pendingClipboardUrl])
-
-  const handleClipboardDismiss = useCallback(() => {
-    setClipboardUrl(null)
-    setPendingClipboardUrl(null)
-    setOrbState('idle')
-    window.electronAPI?.toastToggle?.(false)
-  }, [])
-
   const handleOrbClick     = useCallback(() => setIsOpen(v => !v), [])
   const handleLongPress    = useCallback(() => setIsOpen(true), [])
   const handleDropConsumed = useCallback(() => setPendingDropFile(null), [])
@@ -226,13 +183,6 @@ function ArcaProviderInner({ children }: { children: React.ReactNode }) {
       <SpotlightSearch
         isOpen={isSpotlightOpen}
         onClose={handleSpotlightClose}
-      />
-
-      {/* Clipboard link-detected toast */}
-      <ClipboardToast
-        url={clipboardUrl}
-        onSave={handleClipboardSave}
-        onDismiss={handleClipboardDismiss}
       />
 
       <ChatPanel

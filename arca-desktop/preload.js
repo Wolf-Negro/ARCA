@@ -6,8 +6,6 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('electronAPI', {
   onActivateVoice:  (cb)    => ipcRenderer.on('activate-voice', () => cb()),
   offActivateVoice: ()      => ipcRenderer.removeAllListeners('activate-voice'),
-  onClipboardDetected: (cb) => ipcRenderer.on('clipboard-detected', (_, url) => cb(url)),
-  offClipboardDetected: ()  => ipcRenderer.removeAllListeners('clipboard-detected'),
   onSpotlightToggle: (cb)   => ipcRenderer.on('spotlight-toggle', (_, isOpen) => cb(isOpen)),
   offSpotlightToggle: ()    => ipcRenderer.removeAllListeners('spotlight-toggle'),
   spotlightToggle:  (open)  => ipcRenderer.send('spotlight-toggle', open),
@@ -15,7 +13,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal:     (url)   => ipcRenderer.invoke('open-external', url),
   copyToClipboard:  (text)  => ipcRenderer.invoke('copy-clipboard', text),
   panelToggle:      (open)  => ipcRenderer.send('panel-toggle', open),
-  toastToggle:      (open)  => ipcRenderer.send('toast-toggle', open),
   moveWindow:       (x, y)  => ipcRenderer.send('move-window', { x, y }),
   snapToEdge:       ()      => ipcRenderer.send('snap-to-edge',
                                  { x: window.screenX, y: window.screenY }),

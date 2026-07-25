@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-export type OrbState = 'idle' | 'listening' | 'processing' | 'responding' | 'success' | 'clipboard'
+export type OrbState = 'idle' | 'listening' | 'processing' | 'responding' | 'success'
 
 interface Particle {
   x: number
@@ -218,14 +218,6 @@ export function ParticleOrb({
           p.x = lerp(p.x, tx, 0.05)
           p.y = lerp(p.y, ty, 0.05)
 
-        } else if (s === 'clipboard') {
-          // clipboard — gentle pulsing spiral outward
-          p.angle += p.speed * effectiveSpd * 1.3
-          const pulse = orbit * (0.7 + 0.3 * Math.sin(now * 0.004 + p.phase))
-          const tx = CTR + Math.cos(p.angle) * pulse
-          const ty = CTR + Math.sin(p.angle) * pulse
-          p.x = lerp(p.x, tx, 0.05)
-          p.y = lerp(p.y, ty, 0.05)
         } else {
           // success — explode outward
           p.angle += p.speed * effectiveSpd
@@ -313,26 +305,6 @@ export function ParticleOrb({
         ctx.stroke()
       }
 
-      // ── Clipboard pulse rings ─────────────────────────────────────────────
-      if (s === 'clipboard') {
-        const t  = (now % 1800) / 1800
-        const r1 = orbit + t * 20
-        const a1 = 0.5 * (1 - t)
-        ctx.beginPath()
-        ctx.arc(CTR, CTR, r1, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(0,210,255,${a1})`
-        ctx.lineWidth   = 1.5
-        ctx.stroke()
-
-        const t2 = ((now + 900) % 1800) / 1800
-        const r2 = orbit + t2 * 20
-        const a2 = 0.5 * (1 - t2)
-        ctx.beginPath()
-        ctx.arc(CTR, CTR, r2, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(0,210,255,${a2})`
-        ctx.lineWidth   = 1
-        ctx.stroke()
-      }
     }
 
     tick()

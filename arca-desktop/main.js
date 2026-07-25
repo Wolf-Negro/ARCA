@@ -16,17 +16,6 @@ const { createTray } = require('./tray')
 const ORB_SIZE      = 150           // orb-only mode
 const PANEL_W       = 420           // panel width
 const PANEL_H       = 650           // panel height
-// ClipboardToast.tsx renders at width:340 + 16px padding each side + 1px
-// border each side (~374px) and needs ~140px of vertical content — 320x120
-// was clipping it on both axes. TOAST_W=380 stopped the clipping but left
-// only ~3px of window margin around the ~374px content on each side, which
-// combined with the shared 10px screen-edge margin looked glued to the
-// corner — TOAST_MARGIN below is deliberately larger and dedicated to the
-// toast alone, instead of reusing WIN_MARGIN (shared with orb/panel
-// snapping, where 10px is the right call).
-const TOAST_W       = 420
-const TOAST_H       = 170
-const TOAST_MARGIN  = 20            // toast-to-screen-edge margin (breathing room around its ~374px content)
 const WIN_MARGIN    = 10            // screen-edge margin (orb / panel)
 const DEFAULT_PORT  = 3000
 let   NEXT_URL       = `http://localhost:${DEFAULT_PORT}`   // reassigned once the real port is known
@@ -641,35 +630,6 @@ function registerIPC() {
     }
   })
 
-  // ── Toast notification open/close ──────────────────────────────────────────
-  ipcMain.on('toast-toggle', (_event, isOpen) => {
-    if (!win) return
-    const display = displayForWindow()
-    const { x: dx, y: dy, width: dw, height: dh } = display.workArea
-
-    if (isOpen) {
-      const [wx, wy] = win.getPosition()
-      if (savedOrbX === null) {
-        savedOrbX = wx
-        savedOrbY = wy
-      }
-
-      win.setMinimumSize(TOAST_W, TOAST_H)
-      const newX = dx + dw - TOAST_W - TOAST_MARGIN
-      const newY = dy + dh - TOAST_H - TOAST_MARGIN
-      win.setBounds({ x: newX, y: newY, width: TOAST_W, height: TOAST_H }, false)
-      win.show()
-    } else {
-      win.setMinimumSize(ORB_SIZE, ORB_SIZE)
-      const x = savedOrbX ?? (dx + dw - ORB_SIZE - WIN_MARGIN)
-      const y = savedOrbY ?? (dy + dh - ORB_SIZE - WIN_MARGIN)
-      savedOrbX = null
-      savedOrbY = null
-      win.setBounds({ x, y, width: ORB_SIZE, height: ORB_SIZE }, false)
-      savePosition()
-    }
-  })
-
   ipcMain.handle('open-external', (_event, url) => {
     try {
       const parsed = new URL(String(url))
@@ -701,7 +661,6 @@ function registerIPC() {
     win = createWindow(null)
     tray = createTray(win)
     registerShortcuts()
-    startClipboardPoll()
   })
 
   ipcMain.on('reset-onboarding', () => {
@@ -716,27 +675,6 @@ function registerIPC() {
     // adminSecret travels over IPC only — never written to arca-config.json.
     return { ...cfg, adminSecret: ADMIN_SECRET }
   })
-}
-
-let lastClipboardUrl = ''
-function startClipboardPoll() {
-  setInterval(() => {
-    try {
-      if (!win || win.isDestroyed() || !win.isVisible()) return
-      const text = clipboard.readText().trim()
-      if (!text) return
-      if (/^https?:\/\/[^\s]+$/i.test(text)) {
-        if (text !== lastClipboardUrl) {
-          lastClipboardUrl = text
-          if (win && !win.isDestroyed()) {
-            win.webContents.send('clipboard-detected', text)
-          }
-        }
-      }
-    } catch (err) {
-      // ignore
-    }
-  }, 1500)
 }
 
 // ── Permissions ────────────────────────────────────────────────────────────
@@ -803,7 +741,6 @@ app.whenReady().then(async () => {
     win  = createWindow(savedBounds)
     tray = createTray(win)
     registerShortcuts()
-    startClipboardPoll()
   } else {
     createOnboardingWindow()
   }
