@@ -58,9 +58,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 24: better-sqlite3 12.x no longer ships prebuilds for the
+          # EOL Node 20 line, and compiling from source needs a Visual Studio
+          # that node-gyp on the runner image fails to detect. Node 24
+          # prebuilds exist and this matches the Node bundled into the app.
+          node-version: 24
       - name: Install and build arca-app
         working-directory: arca-app
+        shell: bash
         run: |
           npm ci
           npm run build
@@ -69,6 +74,7 @@ jobs:
         run: npm ci
       - name: Build Windows installer
         working-directory: arca-desktop
+        shell: bash
         run: npm run build:win -- --publish never
       - name: Upload Windows artifacts to release
         env:
@@ -89,7 +95,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - name: Install and build arca-app
         working-directory: arca-app
         run: |
