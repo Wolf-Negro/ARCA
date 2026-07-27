@@ -1,0 +1,113 @@
+# Builds and publishes ARCA installers for Windows and macOS whenever a
+# version tag (v*) is pushed. GitHub's own runners do the compiling — the
+# macOS build needs no physical Mac.
+#
+# Publishing model: a single job creates the release, then each platform
+# uploads its artifacts with `gh release upload`. electron-builder always
+# runs with --publish never so IT never talks to GitHub (its auto-publish
+# would race between jobs and clobber metadata).
+#
+# macOS is unsigned for now (no Apple Developer account): users open it the
+# first time with right-click → Open. Auto-update only works on Windows —
+# electron-updater on macOS requires a signed app, so latest-mac.yml is
+# deliberately not uploaded.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release for tag (idempotent)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          cat > notes.md << 'EOF'
+          ## Instalación
+
+          **Windows:** descarga `ARCA-Setup-x.y.z.exe`. SmartScreen mostrará una advertencia azul (app sin firmar): clic en **"Más información"** → **"Ejecutar de todas formas"**. Las instalaciones existentes se actualizan solas.
+
+          **Mac (Apple Silicon — M1/M2/M3/M4):** descarga `ARCA-x.y.z-arm64.dmg`, ábrelo y arrastra ARCA a Aplicaciones. La primera vez: **clic derecho sobre ARCA → Abrir → Abrir** (app sin firmar). Si macOS dice que está "dañada", abre Terminal y ejecuta: `xattr -cr /Applications/ARCA.app` y vuelve a intentar. En Mac las actualizaciones se descargan a mano desde esta página.
+
+          Los Mac con procesador Intel (anteriores a 2021) no están soportados todavía — usa la versión de Windows.
+
+          ## Uso
+
+          `Ctrl+Space` muestra/oculta ARCA. Pega cualquier link en el chat y ARCA lo guarda y clasifica. IA opcional: engranaje ⚙ → Inteligencia artificial → API key de Gemini (gratis en https://aistudio.google.com/apikey).
+          EOF
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "ARCA $TAG" --notes-file notes.md
+
+  windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install and build arca-app
+        working-directory: arca-app
+        run: |
+          npm ci
+          npm run build
+      - name: Install arca-desktop deps
+        working-directory: arca-desktop
+        run: npm ci
+      - name: Build Windows installer
+        working-directory: arca-desktop
+        run: npm run build:win -- --publish never
+      - name: Upload Windows artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        working-directory: arca-desktop
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/ARCA-Setup-*.exe \
+            dist/ARCA-Setup-*.exe.blockmap \
+            dist/latest.yml
+
+  macos:
+    needs: create-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install and build arca-app
+        working-directory: arca-app
+        run: |
+          npm ci
+          npm run build
+      - name: Install arca-desktop deps
+        working-directory: arca-desktop
+        run: npm ci
+      - name: Build macOS dmg (unsigned, arm64)
+        working-directory: arca-desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run build:mac -- --publish never
+      - name: Upload macOS artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: arca-desktop
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            dist/ARCA-*-arm64.dmg

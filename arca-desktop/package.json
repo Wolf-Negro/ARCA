@@ -1,14 +1,17 @@
 {
   "name": "arca-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ARCA — Asistente de Archivos para Agencias (Desktop)",
+  "author": "Wolf-Negro",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
     "prebuild:win": "node scripts/stage-node-binary.js",
+    "prebuild:mac": "node scripts/stage-node-binary.js",
     "build": "electron-builder",
-    "build:win": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -70,10 +73,31 @@
         }
       ],
       "icon": "../arca-app/public/icon-512.png",
+      "artifactName": "ARCA-Setup-${version}.${ext}",
       "extraResources": [
         {
           "from": ".staging/node.exe",
           "to": "node/node.exe"
+        }
+      ]
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "../arca-app/public/icon-512.png",
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "artifactName": "ARCA-${version}-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": ".staging/node",
+          "to": "node/node"
         }
       ]
     },

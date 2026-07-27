@@ -197,7 +197,8 @@ function spawnServer(port) {
     // ELECTRON_RUN_AS_NODE. Bundling the same real Node.js binary sidesteps
     // that entirely — no per-platform native rebuild step needed.
     const serverEntry = path.join(process.resourcesPath, 'app', 'server.js')
-    const nodeBinary   = path.join(process.resourcesPath, 'node', 'node.exe')
+    const nodeBinary   = path.join(process.resourcesPath, 'node',
+      process.platform === 'win32' ? 'node.exe' : 'node')
     return spawn(nodeBinary, [serverEntry], {
       cwd:      path.join(process.resourcesPath, 'app'),
       env,
@@ -489,7 +490,11 @@ function scheduleRetry() {
 // ── Global shortcuts ──────────────────────────────────────────────────────────
 
 function registerShortcuts() {
-  const ok1 = globalShortcut.register('CommandOrControl+Space', () => {
+  // On macOS, CommandOrControl+Space would be Cmd+Space — always owned by
+  // macOS Spotlight, so registration would silently fail. Use the physical
+  // Control key there instead.
+  const toggleAccel = process.platform === 'darwin' ? 'Control+Space' : 'CommandOrControl+Space'
+  const ok1 = globalShortcut.register(toggleAccel, () => {
     if (!win) return
     if (win.isVisible() && win.isFocused()) win.hide()
     else { win.show(); win.focus() }
