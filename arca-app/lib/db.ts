@@ -676,8 +676,12 @@ export async function searchDocumentsAsync(
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (query) {
     // Word-by-word AND-of-ORs, mirroring the local matchScore(): every
-    // meaningful word must appear in at least one field (tags is JSON text;
-    // raw_content lets documents be found by their extracted contents).
+    // meaningful word must appear in at least one field. raw_content lets
+    // documents be found by their extracted contents. tags is deliberately
+    // ABSENT: the remote column is text[], and tags.ilike makes PostgREST
+    // reject the WHOLE query ("operator does not exist: text[] ~~*") —
+    // which silently emptied every team-mode search in the field (v0.1.2
+    // through v0.1.4). Tag hits still work via the local fallback below.
     // Stopwords are filtered like in queryWords(), but the surviving words
     // keep their accents — Postgres ilike is accent-sensitive.
     const all        = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -686,15 +690,28 @@ export async function searchDocumentsAsync(
     if (words.length) {
       const perWord = words.map((w) => {
         const q = encodeURIComponent(`*${w}*`)
-        return `or(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q},tags.ilike.${q},file_url.ilike.${q},raw_content.ilike.${q})`
+        return `or(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q},file_url.ilike.${q},raw_content.ilike.${q})`
       })
       path += `&and=(${perWord.join(',')})`
     }
   }
   const res = await fetch(supabaseUrl(path), { headers: supabaseHeaders() })
-  if (!res.ok) return []
+  if (!res.ok) {
+    // Never fail silent again: log the PostgREST error AND fall back to the
+    // local DB — team mode is local-first, so the docs are also here.
+    console.error('[db] searchDocumentsAsync rechazada por Supabase:', res.status, await res.text().catch(() => ''))
+    return searchDocuments(query, clientFilter, docTypeFilter)
+  }
   const rows = await res.json()
-  return rows.map(rowToDocFromSupabase)
+  const remote: Document[] = rows.map(rowToDocFromSupabase)
+
+  // Merge in local-only hits (unsynced docs, file:// links, tag matches that
+  // the remote query can't express) — remote results keep priority.
+  const seen = new Set(remote.map((d) => d.id))
+  for (const local of searchDocuments(query, clientFilter, docTypeFilter)) {
+    if (!seen.has(local.id)) remote.push(local)
+  }
+  return remote
 }
 
 export async function listRecentDocumentsAsync(limit: number, clientFilter?: string): Promise<Document[]> {
