@@ -501,7 +501,7 @@ export function listAllDocuments(
       if (a.pinned !== b.pinned) return b.pinned - a.pinned
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  if (search)        { const q = search.toLowerCase();       docs = docs.filter(d => textMatches(d, q)) }
+  if (search)        { const words = queryWords(search); if (words.length) docs = docs.filter(d => matchScore(d, words) > 0) }
   if (clientFilter)  { docs = docs.filter(d => d.client_name === clientFilter) }
   if (docTypeFilter) { const f = docTypeFilter.toLowerCase(); docs = docs.filter(d => d.doc_type.toLowerCase().includes(f)) }
   const total = docs.length
