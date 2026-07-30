@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
                                  { x: window.screenX, y: window.screenY }),
   hideWindow:       ()      => ipcRenderer.send('hide-window'),
   getConfig:        ()      => ipcRenderer.invoke('get-config'),
+  resetOnboarding:  ()      => ipcRenderer.send('reset-onboarding'),
 })
 
 // ── Inject styles as soon as the DOM is available ────────────────────────────

@@ -25,7 +25,8 @@ declare global {
       moveWindow?:           (x: number, y: number) => void
       snapToEdge?:           () => void
       hideWindow?:           () => void
-      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; anonKey?: string; teamId?: string; adminSecret?: string } | null>
+      getConfig?:            () => Promise<{ mode: string; storage?: string; supabaseUrl?: string; supabaseKey?: string; anonKey?: string; teamId?: string; adminSecret?: string; appVersion?: string } | null>
+      resetOnboarding?:      () => void
     }
   }
 }

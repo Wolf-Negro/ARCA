@@ -688,6 +688,18 @@ function registerIPC() {
     registerShortcuts()
   })
 
+  // Settings → "Cambiar de modo o agencia": wipe the mode config (never the
+  // documents) and relaunch straight into onboarding. app.relaunch+exit gives
+  // a clean slate — no window/tray juggling, no stale server.
+  ipcMain.on('reset-onboarding', () => {
+    try { fs.unlinkSync(configFile()) } catch {}
+    try { fs.unlinkSync(path.join(app.getPath('userData'), 'arca-data', 'team-config.json')) } catch {}
+    isQuitting = true
+    stopNextServer()
+    app.relaunch()
+    app.exit(0)
+  })
+
   ipcMain.handle('get-config', () => {
     const cfg = loadConfig()
     if (!cfg) return cfg

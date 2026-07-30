@@ -315,8 +315,10 @@ function GeminiSection() {
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { theme, setTheme } = useTheme()
-  const [docCount, setDocCount]     = useState<number | null>(null)
-  const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [docCount, setDocCount]         = useState<number | null>(null)
+  const [appVersion, setAppVersion]     = useState<string | null>(null)
+  const [modeInfo, setModeInfo]         = useState<{ mode?: string; teamId?: string } | null>(null)
+  const [confirmReset, setConfirmReset] = useState(false)
 
   useEffect(() => {
     fetch('/api/search', {
@@ -332,7 +334,11 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     // get-config) — never hardcode it here: a static label can't tell the
     // user whether the auto-update actually applied.
     window.electronAPI?.getConfig?.()
-      .then((cfg) => setAppVersion((cfg as { appVersion?: string } | null)?.appVersion ?? null))
+      .then((cfg) => {
+        const c = cfg as { appVersion?: string; mode?: string; teamId?: string } | null
+        setAppVersion(c?.appVersion ?? null)
+        setModeInfo(c ? { mode: c.mode, teamId: c.teamId } : null)
+      })
       .catch(() => {})
   }, [])
 
@@ -446,6 +452,77 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           </div>
         ))}
       </section>
+
+      {/* Cuenta / modo (solo dentro de Electron, donde existe el IPC) */}
+      {window.electronAPI?.resetOnboarding && modeInfo && (
+        <section>
+          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 10 }}>
+            Cuenta
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Row
+              label="Modo"
+              value={modeInfo.mode === 'team' ? `Equipo · ${modeInfo.teamId ?? '?'}` : 'Personal'}
+            />
+            {!confirmReset ? (
+              <button
+                onClick={() => setConfirmReset(true)}
+                style={{
+                  background:   'rgba(255,255,255,0.05)',
+                  border:       '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 8,
+                  color:        'rgba(255,255,255,0.7)',
+                  fontSize:     12,
+                  padding:      '8px 10px',
+                  cursor:       'pointer',
+                }}
+              >
+                Cambiar de modo o agencia…
+              </button>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <p style={{ fontSize: 11, color: 'rgba(255,200,120,0.85)', lineHeight: 1.5 }}>
+                  ARCA se reiniciará y volverá a pedir el modo (personal o código de
+                  agencia). Tus documentos guardados NO se borran.
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => window.electronAPI?.resetOnboarding?.()}
+                    style={{
+                      flex: 1,
+                      background:   'rgba(255,120,80,0.15)',
+                      border:       '1px solid rgba(255,120,80,0.4)',
+                      borderRadius: 8,
+                      color:        'rgba(255,160,120,0.95)',
+                      fontSize:     12,
+                      fontWeight:   600,
+                      padding:      '8px 10px',
+                      cursor:       'pointer',
+                    }}
+                  >
+                    Sí, reiniciar y cambiar
+                  </button>
+                  <button
+                    onClick={() => setConfirmReset(false)}
+                    style={{
+                      flex: 1,
+                      background:   'rgba(255,255,255,0.05)',
+                      border:       '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 8,
+                      color:        'rgba(255,255,255,0.6)',
+                      fontSize:     12,
+                      padding:      '8px 10px',
+                      cursor:       'pointer',
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Info */}
       <section>
