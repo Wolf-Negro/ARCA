@@ -129,6 +129,23 @@ describe('lib/db (personal mode, local SQLite)', () => {
       expect(dbModule.searchDocuments('canva inexistentexyz').length).toBe(0)
     })
 
+    it('ignores conversational filler words ("link de arca" case from the field)', () => {
+      dbModule.saveDocument(
+        metadata({ file_name: 'arca silk.vercel.app', client_name: 'ARCA', tags: ['Presentación'] }),
+        'https://arca-silk.vercel.app',
+      )
+      // The exact queries that failed for the user on 2026-07-28:
+      expect(dbModule.searchDocuments('arca').some(d => d.file_name === 'arca silk.vercel.app')).toBe(true)
+      expect(dbModule.searchDocuments('link de arca').some(d => d.file_name === 'arca silk.vercel.app')).toBe(true)
+      expect(dbModule.searchDocuments('dame el link de arca').some(d => d.file_name === 'arca silk.vercel.app')).toBe(true)
+      expect(dbModule.searchDocuments('busca los archivos de arca').some(d => d.file_name === 'arca silk.vercel.app')).toBe(true)
+    })
+
+    it('still searches literally when the whole query is stopwords', () => {
+      // Nothing contains the word "dame" → no results, but no crash either.
+      expect(dbModule.searchDocuments('dame').length).toBe(0)
+    })
+
     it('ranks title/client hits above content-only hits', () => {
       dbModule.saveDocument(
         metadata({ file_name: 'Notas varias', client_name: 'Otra Empresa', tags: [] }),

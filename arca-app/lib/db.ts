@@ -332,8 +332,33 @@ function stripAccents(s: string): string {
 // both sides, and the extracted raw_content counts too (lowest weight), so
 // documents are findable by what's INSIDE them.
 
+// Filler words that appear in conversational queries ("dame el link de X",
+// "busca los archivos del cliente Y") but almost never inside a document's
+// fields. Requiring them to match — the AND-per-word rule — would sink the
+// whole query, so they're dropped first. If EVERY word is filler, the
+// original words are kept: someone literally searching "link" still can.
+const STOPWORDS = new Set([
+  // artículos / preposiciones / conectores
+  'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas',
+  'y', 'o', 'u', 'en', 'al', 'a', 'por', 'para', 'con', 'sin', 'sobre',
+  'que', 'cual', 'cuales', 'donde', 'esta', 'estan', 'es', 'son',
+  'mi', 'mis', 'tu', 'tus', 'su', 'sus', 'lo', 'le', 'se', 'me', 'te',
+  // verbos de petición típicos del chat
+  'dame', 'dime', 'muestrame', 'muestra', 'ensename', 'busca', 'buscar',
+  'buscame', 'encuentra', 'encuentrame', 'quiero', 'necesito', 'tengo',
+  'hay', 'ver', 'abre', 'abrir', 'pasame', 'mandame',
+  // sustantivos genéricos de la propia app
+  'link', 'links', 'enlace', 'enlaces', 'archivo', 'archivos',
+  'documento', 'documentos', 'doc', 'docs', 'fichero', 'ficheros',
+  'cliente', 'guardado', 'guardados', 'algo', 'cosa', 'cosas',
+  // muletillas
+  'oye', 'hola', 'porfa', 'porfavor', 'favor', 'porfis',
+])
+
 function queryWords(q: string): string[] {
-  return stripAccents(q.toLowerCase()).split(/\s+/).filter(Boolean)
+  const all = stripAccents(q.toLowerCase()).split(/\s+/).filter(Boolean)
+  const meaningful = all.filter((w) => !STOPWORDS.has(w))
+  return meaningful.length ? meaningful : all
 }
 
 /** 0 = no match. Every word must appear in SOME field; the score adds the
@@ -650,10 +675,14 @@ export async function searchDocumentsAsync(
   if (clientFilter)  path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (query) {
-    // Word-by-word AND-of-ORs, mirroring the local matchScore(): every word
-    // must appear in at least one field (tags is JSON text; raw_content lets
-    // documents be found by their extracted contents).
-    const words = query.trim().split(/\s+/).filter(Boolean).slice(0, 8)
+    // Word-by-word AND-of-ORs, mirroring the local matchScore(): every
+    // meaningful word must appear in at least one field (tags is JSON text;
+    // raw_content lets documents be found by their extracted contents).
+    // Stopwords are filtered like in queryWords(), but the surviving words
+    // keep their accents — Postgres ilike is accent-sensitive.
+    const all        = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const meaningful = all.filter((w) => !STOPWORDS.has(w.normalize('NFD').replace(/[̀-ͯ]/g, '')))
+    const words      = (meaningful.length ? meaningful : all).slice(0, 8)
     if (words.length) {
       const perWord = words.map((w) => {
         const q = encodeURIComponent(`*${w}*`)
