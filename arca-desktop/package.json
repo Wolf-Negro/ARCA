@@ -1,6 +1,6 @@
 {
   "name": "arca-desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "ARCA — Asistente de Archivos para Agencias (Desktop)",
   "author": "Wolf-Negro",
   "main": "main.js",

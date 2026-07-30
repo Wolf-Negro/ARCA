@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import { DOC_TYPES } from '@/lib/types'
 import type { DocumentMetadata } from '@/lib/types'
 
 interface MetadataCardProps {
@@ -9,14 +10,6 @@ interface MetadataCardProps {
   onConfirm?: () => void
   onEdit?:    (updated: DocumentMetadata) => void
 }
-
-const DOC_TYPES = [
-  'Google Doc', 'Google Sheet', 'Google Slides', 'Google Drive',
-  'Dashboard / Reporte', 'Looker Studio', 'Propuesta Comercial',
-  'Presupuesto', 'Contrato', 'Brief de Campaña', 'Calendario de Contenido',
-  'Creativo / Imagen', 'Creativo / Video', 'Factura', 'Presentación',
-  'Métricas / Resultados', 'Informe Mensual', 'Plan de Medios',
-]
 
 const TYPE_EMOJI: Record<string, string> = {
   'Google Doc': '📄', 'Google Sheet': '📊', 'Google Slides': '📑',
@@ -71,12 +64,6 @@ const INPUT_STYLE: React.CSSProperties = {
   transition:   'border-color 0.15s',
 }
 
-const SELECT_STYLE: React.CSSProperties = {
-  ...INPUT_STYLE,
-  cursor: 'pointer',
-  WebkitAppRegion: 'no-drag',
-}
-
 function Divider() {
   return <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '0 0' }} />
 }
@@ -125,10 +112,24 @@ function HoverButton({
 export function MetadataCard({ metadata, onConfirm, onEdit }: MetadataCardProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft]         = useState<DocumentMetadata>(metadata)
+  // Tags live as a PLAIN STRING while typing — parsing into an array on
+  // every keystroke ate the comma the instant it was typed (split+filter
+  // normalized "Landing," back to "Landing").
+  const [tagsRaw, setTagsRaw]     = useState((metadata.tags ?? []).join(', '))
+
+  function startEdit() {
+    setTagsRaw((draft.tags ?? []).join(', '))
+    setIsEditing(true)
+  }
 
   function applyEdit() {
+    const updated = {
+      ...draft,
+      tags: tagsRaw.split(',').map((t) => t.trim()).filter(Boolean),
+    }
+    setDraft(updated)
     setIsEditing(false)
-    onEdit?.(draft)
+    onEdit?.(updated)
   }
 
   const emoji = TYPE_EMOJI[draft.doc_type] ?? '📄'
@@ -168,13 +169,18 @@ export function MetadataCard({ metadata, onConfirm, onEdit }: MetadataCardProps)
           </div>
           <div>
             <span style={LABEL_STYLE}>Tipo</span>
-            <select
-              style={SELECT_STYLE}
+            {/* Free text with suggestions — a closed <select> forced users
+                into our taxonomy; the datalist suggests it without limiting. */}
+            <input
+              style={INPUT_STYLE}
+              list="arca-doc-types"
               value={draft.doc_type}
               onChange={(e) => setDraft({ ...draft, doc_type: e.target.value })}
-            >
-              {DOC_TYPES.map((t) => <option key={t} value={t} style={{ background: '#1A1A24' }}>{t}</option>)}
-            </select>
+              placeholder="Escribe o elige un tipo"
+            />
+            <datalist id="arca-doc-types">
+              {DOC_TYPES.map((t) => <option key={t} value={t} />)}
+            </datalist>
           </div>
           <div>
             <span style={LABEL_STYLE}>Nombre del archivo</span>
@@ -188,11 +194,9 @@ export function MetadataCard({ metadata, onConfirm, onEdit }: MetadataCardProps)
             <span style={LABEL_STYLE}>Tags (separados por coma)</span>
             <input
               style={INPUT_STYLE}
-              value={draft.tags?.join(', ') ?? ''}
-              onChange={(e) => setDraft({
-                ...draft,
-                tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
-              })}
+              value={tagsRaw}
+              onChange={(e) => setTagsRaw(e.target.value)}
+              placeholder="tag1, tag2, tag3"
             />
           </div>
         </div>
@@ -284,7 +288,7 @@ export function MetadataCard({ metadata, onConfirm, onEdit }: MetadataCardProps)
               Guardar ✓
             </HoverButton>
             <HoverButton
-              onClick={() => setIsEditing(true)}
+              onClick={startEdit}
               style={{
                 padding: '8px 14px',
                 background: 'transparent',
