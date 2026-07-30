@@ -315,7 +315,8 @@ function GeminiSection() {
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { theme, setTheme } = useTheme()
-  const [docCount, setDocCount] = useState<number | null>(null)
+  const [docCount, setDocCount]     = useState<number | null>(null)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/search', {
@@ -325,6 +326,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     })
       .then((r) => r.json())
       .then((d) => setDocCount(d.count ?? 0))
+      .catch(() => {})
+
+    // Real installed version straight from Electron (app.getVersion() via
+    // get-config) — never hardcode it here: a static label can't tell the
+    // user whether the auto-update actually applied.
+    window.electronAPI?.getConfig?.()
+      .then((cfg) => setAppVersion((cfg as { appVersion?: string } | null)?.appVersion ?? null))
       .catch(() => {})
   }, [])
 
@@ -445,7 +453,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           Información
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <Row label="Versión" value="1.0.0" />
+          <Row label="Versión" value={appVersion ?? '—'} />
           <Row label="Documentos guardados" value={docCount !== null ? String(docCount) : '...'} />
         </div>
       </section>

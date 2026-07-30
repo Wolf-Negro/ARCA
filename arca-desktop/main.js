@@ -692,7 +692,9 @@ function registerIPC() {
     const cfg = loadConfig()
     if (!cfg) return cfg
     // adminSecret travels over IPC only — never written to arca-config.json.
-    return { ...cfg, adminSecret: ADMIN_SECRET }
+    // appVersion feeds the settings screen so it shows the REAL installed
+    // version (it used to be a hardcoded label).
+    return { ...cfg, adminSecret: ADMIN_SECRET, appVersion: app.getVersion() }
   })
 }
 
