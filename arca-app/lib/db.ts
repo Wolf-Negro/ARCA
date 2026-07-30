@@ -323,13 +323,45 @@ function stripAccents(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
 }
 
-// Accent-insensitive on BOTH sides: /api/search normalizes the incoming
-// query, so document fields must be normalized too or "presentacion" would
-// never match a doc containing "presentación".
-function textMatches(doc: Document, q: string): boolean {
-  const needle = stripAccents(q.toLowerCase())
-  return [doc.file_name, doc.client_name, doc.description, doc.file_url, ...doc.tags]
-    .some(f => f && stripAccents(f.toLowerCase()).includes(needle))
+// ─── Word-by-word search ──────────────────────────────────────────────────────
+// Modeled after the Organizador project's search: every field joined into one
+// haystack, matched per WORD instead of per phrase. "canva pepe" matches a doc
+// whose URL contains "canva" and whose client is "Pepe" — the old logic
+// required the contiguous phrase "canva pepe" inside a single field, which is
+// why multi-word queries almost never found anything. Accent-insensitive on
+// both sides, and the extracted raw_content counts too (lowest weight), so
+// documents are findable by what's INSIDE them.
+
+function queryWords(q: string): string[] {
+  return stripAccents(q.toLowerCase()).split(/\s+/).filter(Boolean)
+}
+
+/** 0 = no match. Every word must appear in SOME field; the score adds the
+ *  best field weight per word, so title/client/tag hits rank above hits that
+ *  only exist deep in the extracted content. */
+function matchScore(doc: Document, words: string[]): number {
+  if (!words.length) return 0
+  const fields: [string | null, number][] = [
+    [doc.file_name,        5],
+    [doc.client_name,      4],
+    [doc.tags.join(' '),   3],
+    [doc.description,      2],
+    [doc.file_url,         2],
+    [doc.raw_content,      1],
+  ]
+  const haystacks = fields.map(([text, weight]) =>
+    [text ? stripAccents(text.toLowerCase()) : '', weight] as const)
+
+  let score = 0
+  for (const word of words) {
+    let best = 0
+    for (const [text, weight] of haystacks) {
+      if (weight > best && text.includes(word)) best = weight
+    }
+    if (best === 0) return 0
+    score += best
+  }
+  return score
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -400,15 +432,27 @@ export function searchDocuments(
   clientFilter?:  string,
   docTypeFilter?: string
 ): Document[] {
-  const q = query.toLowerCase().trim()
+  const words = queryWords(query)
   let docs = Array.from(loadCache().values())
   if (clientFilter)  docs = docs.filter(d => d.client_name?.toLowerCase().includes(clientFilter.toLowerCase()))
   if (docTypeFilter) { const f = docTypeFilter.toLowerCase(); docs = docs.filter(d => d.doc_type.toLowerCase().includes(f)) }
-  if (q)             docs = docs.filter(d => textMatches(d, q))
-  return docs.sort((a, b) => {
-    if (a.pinned !== b.pinned) return b.pinned - a.pinned
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  })
+
+  if (!words.length) {
+    return docs.sort((a, b) => {
+      if (a.pinned !== b.pinned) return b.pinned - a.pinned
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+  }
+
+  return docs
+    .map(d => ({ d, score: matchScore(d, words) }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => {
+      if (a.d.pinned !== b.d.pinned) return b.d.pinned - a.d.pinned
+      if (a.score !== b.score)       return b.score - a.score
+      return new Date(b.d.created_at).getTime() - new Date(a.d.created_at).getTime()
+    })
+    .map(x => x.d)
 }
 
 export function listRecentDocuments(limit: number, clientFilter?: string): Document[] {
@@ -606,10 +650,17 @@ export async function searchDocumentsAsync(
   if (clientFilter)  path += `&client_name=ilike.*${encodeURIComponent(clientFilter)}*`
   if (docTypeFilter) path += `&doc_type=ilike.*${encodeURIComponent(docTypeFilter)}*`
   if (query) {
-    const q = encodeURIComponent(`*${query}*`)
-    // Same fields the local textMatches() searches — tags (JSON text) and
-    // file_url included so both modes return consistent results.
-    path += `&or=(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q},tags.ilike.${q},file_url.ilike.${q})`
+    // Word-by-word AND-of-ORs, mirroring the local matchScore(): every word
+    // must appear in at least one field (tags is JSON text; raw_content lets
+    // documents be found by their extracted contents).
+    const words = query.trim().split(/\s+/).filter(Boolean).slice(0, 8)
+    if (words.length) {
+      const perWord = words.map((w) => {
+        const q = encodeURIComponent(`*${w}*`)
+        return `or(file_name.ilike.${q},description.ilike.${q},client_name.ilike.${q},tags.ilike.${q},file_url.ilike.${q},raw_content.ilike.${q})`
+      })
+      path += `&and=(${perWord.join(',')})`
+    }
   }
   const res = await fetch(supabaseUrl(path), { headers: supabaseHeaders() })
   if (!res.ok) return []

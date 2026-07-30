@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       return true
     })
 
-    return NextResponse.json({ results: results.slice(0, 5) })
+    return NextResponse.json({ results: results.slice(0, 8) })
   } catch (err) {
     console.error('[/api/search]', err)
     const message = err instanceof Error ? err.message : 'Error desconocido'

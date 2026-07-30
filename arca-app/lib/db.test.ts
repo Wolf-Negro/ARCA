@@ -74,6 +74,74 @@ describe('lib/db (personal mode, local SQLite)', () => {
     expect(results[0].file_name).toBe('buscar-unico-xyz.pdf')
   })
 
+  describe('word-by-word search (Organizador-style)', () => {
+    beforeAll(() => {
+      dbModule.saveDocument(
+        metadata({
+          file_name:   'Brief campaña verano',
+          client_name: 'Pepe Motors',
+          description: 'Lineamientos de la campaña',
+          tags:        ['Canva', 'Diseño'],
+        }),
+        'https://www.canva.com/design/DAF-verano-2026',
+      )
+      dbModule.saveDocument(
+        metadata({
+          file_name:   'Presupuesto anual',
+          client_name: 'Otra Empresa',
+          description: 'Números del año',
+          tags:        ['Finanzas'],
+        }),
+        'https://docs.google.com/spreadsheets/d/abc',
+        undefined,
+        'contiene la palabra factibilidad dentro del contenido extraído',
+      )
+    })
+
+    it('matches when the query words live in DIFFERENT fields (url + client)', () => {
+      const results = dbModule.searchDocuments('canva pepe')
+      expect(results.length).toBe(1)
+      expect(results[0].file_name).toBe('Brief campaña verano')
+    })
+
+    it('matches by a word inside the URL', () => {
+      const results = dbModule.searchDocuments('spreadsheets')
+      expect(results.some(d => d.file_name === 'Presupuesto anual')).toBe(true)
+    })
+
+    it('matches by tag', () => {
+      const results = dbModule.searchDocuments('finanzas')
+      expect(results.some(d => d.file_name === 'Presupuesto anual')).toBe(true)
+    })
+
+    it('matches by extracted raw content', () => {
+      const results = dbModule.searchDocuments('factibilidad')
+      expect(results.some(d => d.file_name === 'Presupuesto anual')).toBe(true)
+    })
+
+    it('is accent-insensitive in both directions', () => {
+      expect(dbModule.searchDocuments('campana').some(d => d.file_name === 'Brief campaña verano')).toBe(true)
+      expect(dbModule.searchDocuments('diseño').some(d => d.file_name === 'Brief campaña verano')).toBe(true)
+      expect(dbModule.searchDocuments('diseno').some(d => d.file_name === 'Brief campaña verano')).toBe(true)
+    })
+
+    it('requires EVERY word to appear somewhere (no partial-query noise)', () => {
+      expect(dbModule.searchDocuments('canva inexistentexyz').length).toBe(0)
+    })
+
+    it('ranks title/client hits above content-only hits', () => {
+      dbModule.saveDocument(
+        metadata({ file_name: 'Notas varias', client_name: 'Otra Empresa', tags: [] }),
+        undefined,
+        undefined,
+        'menciona a pepe de pasada en el contenido',
+      )
+      const results = dbModule.searchDocuments('pepe')
+      expect(results.length).toBeGreaterThanOrEqual(2)
+      expect(results[0].client_name).toBe('Pepe Motors')
+    })
+  })
+
   it('updates a document, including pin/unpin via updateDocument', () => {
     const saved = dbModule.saveDocument(metadata({ file_name: 'actualizar.pdf' }))
 
