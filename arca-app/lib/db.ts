@@ -361,11 +361,10 @@ function queryWords(q: string): string[] {
   return meaningful.length ? meaningful : all
 }
 
-/** 0 = no match. Every word must appear in SOME field; the score adds the
- *  best field weight per word, so title/client/tag hits rank above hits that
- *  only exist deep in the extracted content. */
-function matchScore(doc: Document, words: string[]): number {
-  if (!words.length) return 0
+/** Per-doc match: how many query words appear in SOME field, and a score
+ *  that adds the best field weight per word, so title/client/tag hits rank
+ *  above hits that only exist deep in the extracted content. */
+function matchScore(doc: Document, words: string[]): { matched: number; score: number } {
   const fields: [string | null, number][] = [
     [doc.file_name,        5],
     [doc.client_name,      4],
@@ -377,16 +376,16 @@ function matchScore(doc: Document, words: string[]): number {
   const haystacks = fields.map(([text, weight]) =>
     [text ? stripAccents(text.toLowerCase()) : '', weight] as const)
 
-  let score = 0
+  let matched = 0
+  let score   = 0
   for (const word of words) {
     let best = 0
     for (const [text, weight] of haystacks) {
       if (weight > best && text.includes(word)) best = weight
     }
-    if (best === 0) return 0
-    score += best
+    if (best > 0) { matched++; score += best }
   }
-  return score
+  return { matched, score }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -469,12 +468,21 @@ export function searchDocuments(
     })
   }
 
-  return docs
-    .map(d => ({ d, score: matchScore(d, words) }))
-    .filter(x => x.score > 0)
+  const scored = docs.map(d => ({ d, ...matchScore(d, words) }))
+
+  // Strict pass first: every word present. If nothing survives (a typo, a
+  // filler the stopword list doesn't know), fall back to best-effort: docs
+  // matching at least one word, ranked by how many words they match. A
+  // conversational query should degrade to "closest results", never to
+  // "nothing found".
+  let hits = scored.filter(x => x.matched === words.length)
+  if (!hits.length) hits = scored.filter(x => x.matched > 0)
+
+  return hits
     .sort((a, b) => {
-      if (a.d.pinned !== b.d.pinned) return b.d.pinned - a.d.pinned
-      if (a.score !== b.score)       return b.score - a.score
+      if (a.d.pinned !== b.d.pinned)   return b.d.pinned - a.d.pinned
+      if (a.matched !== b.matched)     return b.matched - a.matched
+      if (a.score !== b.score)         return b.score - a.score
       return new Date(b.d.created_at).getTime() - new Date(a.d.created_at).getTime()
     })
     .map(x => x.d)
@@ -526,7 +534,7 @@ export function listAllDocuments(
       if (a.pinned !== b.pinned) return b.pinned - a.pinned
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  if (search)        { const words = queryWords(search); if (words.length) docs = docs.filter(d => matchScore(d, words) > 0) }
+  if (search)        { const words = queryWords(search); if (words.length) docs = docs.filter(d => matchScore(d, words).matched > 0) }
   if (clientFilter)  { docs = docs.filter(d => d.client_name === clientFilter) }
   if (docTypeFilter) { const f = docTypeFilter.toLowerCase(); docs = docs.filter(d => d.doc_type.toLowerCase().includes(f)) }
   const total = docs.length

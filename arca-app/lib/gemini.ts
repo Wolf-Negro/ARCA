@@ -53,14 +53,18 @@ interface GenerateOpts {
   apiKey?:    string
 }
 
-async function geminiRequestModel(model: string, parts: GeminiPart[], key: string, opts: GenerateOpts): Promise<Response> {
+async function geminiRequestModel(model: string, parts: GeminiPart[], key: string, opts: GenerateOpts, withThinkingOff: boolean): Promise<Response> {
   const body: Record<string, unknown> = {
     contents: [{ role: 'user', parts }],
     generationConfig: {
       temperature: 0.2,
       // The -latest aliases point at thinking models; reasoning adds 10s+ of
-      // latency that classification/extraction tasks don't need.
-      thinkingConfig: { thinkingBudget: 0 },
+      // latency that classification/extraction tasks don't need. But it's a
+      // best-effort optimization ONLY: Google rotates the models behind the
+      // aliases and some revisions reject thinkingConfig outright with 400
+      // (seen in the field 2026-07-30, killing the whole AI layer) — the
+      // caller retries without it.
+      ...(withThinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
       ...(opts.json ? { responseMimeType: 'application/json' } : {}),
     },
   }
@@ -81,7 +85,12 @@ const RETRYABLE = new Set([404, 429, 500, 503])
 async function geminiRequest(parts: GeminiPart[], key: string, opts: GenerateOpts): Promise<Response> {
   let last: Response | null = null
   for (const model of GEMINI_MODELS) {
-    const res = await geminiRequestModel(model, parts, key, opts)
+    let res = await geminiRequestModel(model, parts, key, opts, true)
+    // 400 with thinkingConfig on → likely the current alias revision rejects
+    // the field; retry the same model without it before moving on.
+    if (res.status === 400) {
+      res = await geminiRequestModel(model, parts, key, opts, false)
+    }
     if (res.ok || !RETRYABLE.has(res.status)) return res
     last = res
   }
@@ -103,9 +112,17 @@ export async function geminiGenerate(parts: GeminiPart[], opts: GenerateOpts = {
   if (!key) return null
   try {
     const res = await geminiRequest(parts, key, opts)
-    if (!res.ok) return null
+    if (!res.ok) {
+      // Callers degrade silently to the rule-based path (by design), but the
+      // FAILURE itself must be visible in server.log — a dead AI layer went
+      // unnoticed for days because this returned null without a trace.
+      const detail = await res.text().catch(() => '')
+      console.error('[gemini] request failed:', res.status, detail.slice(0, 300))
+      return null
+    }
     return extractResponseText(await res.json())
-  } catch {
+  } catch (err) {
+    console.error('[gemini] request threw:', err instanceof Error ? err.message : err)
     return null
   }
 }

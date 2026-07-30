@@ -125,8 +125,22 @@ describe('lib/db (personal mode, local SQLite)', () => {
       expect(dbModule.searchDocuments('diseno').some(d => d.file_name === 'Brief campaña verano')).toBe(true)
     })
 
-    it('requires EVERY word to appear somewhere (no partial-query noise)', () => {
-      expect(dbModule.searchDocuments('canva inexistentexyz').length).toBe(0)
+    it('degrades to best-effort when a word matches nothing (typo tolerance)', () => {
+      // "inexistentexyz" matches nothing, but "canva" does — the strict
+      // all-words pass fails and the fallback still surfaces the canva doc.
+      const results = dbModule.searchDocuments('canva inexistentexyz')
+      expect(results.some(d => d.file_name === 'Brief campaña verano')).toBe(true)
+    })
+
+    it('conversational sentence with a typo still finds the doc', () => {
+      // "necesitop" (typo) is not a stopword and matches nothing; "arca"
+      // carries the query. Real field case from 2026-07-30.
+      dbModule.saveDocument(
+        metadata({ file_name: 'arca panel admin', client_name: 'ARCA', tags: [] }),
+        'https://arca-silk.vercel.app/panel',
+      )
+      const results = dbModule.searchDocuments('necesitop el link de arca')
+      expect(results.some(d => d.file_name === 'arca panel admin')).toBe(true)
     })
 
     it('ignores conversational filler words ("link de arca" case from the field)', () => {
